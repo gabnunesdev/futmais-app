@@ -1,7 +1,7 @@
 import { supabase } from "./supabase";
 
 export const matchService = {
-  // 1. Cria a partida no banco e retorna o ID
+  // 1. Cria a partida (status: IN_PROGRESS)
   startMatch: async (redIds: string[], blueIds: string[]) => {
     const { data, error } = await supabase
       .from("matches")
@@ -22,22 +22,36 @@ export const matchService = {
     return data;
   },
 
-  // 2. Registra o Gol + Assistência
-  // NOTA: Removido 'teamColor' dos argumentos pois a tabela salva apenas o ID do jogador
+  // 2. BUSCA PARTIDA ATIVA (Essa é a função que faz a Home funcionar!)
+  getActiveMatch: async () => {
+    const { data, error } = await supabase
+      .from("matches")
+      .select("*")
+      .eq("status", "IN_PROGRESS")
+      .order("created_at", { ascending: false }) // ORDENA: Pega a mais recente primeiro
+      .limit(1) // LIMITA: Pega só 1 (ignora as outras 13 travadas)
+      .maybeSingle(); // Retorna o objeto ou null
+
+    if (error) {
+      console.error("Erro ao buscar partida ativa:", error);
+      return null;
+    }
+    return data;
+  },
+
+  // 3. Registra Gol/Assistência
   registerGoal: async (
     matchId: string,
     scorerId: string,
     assistId: string | null
   ) => {
-    // A. Salva o evento do Gol
-    const { error: eventError } = await supabase.from("match_events").insert({
+    const { error } = await supabase.from("match_events").insert({
       match_id: matchId,
       player_id: scorerId,
       event_type: "GOAL",
     });
-    if (eventError) throw eventError;
+    if (error) throw error;
 
-    // B. Salva a Assistência (se houver)
     if (assistId && assistId !== "none") {
       await supabase.from("match_events").insert({
         match_id: matchId,
@@ -47,7 +61,7 @@ export const matchService = {
     }
   },
 
-  // Atualiza placar solto
+  // 4. Atualiza Placar Geral
   updateScore: async (
     matchId: string,
     newScoreRed: number,
@@ -60,41 +74,70 @@ export const matchService = {
     if (error) throw error;
   },
 
-  getActiveMatch: async () => {
-    const { data, error } = await supabase
-      .from("matches")
-      .select("*") // Pega tudo da match
-      .eq("status", "IN_PROGRESS")
-      .single(); // Esperamos apenas uma partida ativa por vez
-
-    if (error && error.code !== "PGRST116") {
-      // PGRST116 é "nenhum resultado", que é ok
-      console.error("Erro ao buscar partida ativa:", error);
-      return null;
-    }
-    return data;
-  },
-
-  // NOVA FUNÇÃO: Busca eventos (gols) de uma partida para reconstruir o placar/ícones
+  // 5. Busca Eventos (Simples)
   getMatchEvents: async (matchId: string) => {
     const { data, error } = await supabase
       .from("match_events")
       .select("*")
       .eq("match_id", matchId);
-
     if (error) throw error;
     return data;
   },
 
+  // 6. Busca Eventos com Nomes (Para o Histórico)
+  getMatchEventsWithNames: async (matchId: string) => {
+    const { data, error } = await supabase
+      .from("match_events")
+      .select("*, players(name)")
+      .eq("match_id", matchId)
+      .order("created_at", { ascending: false });
+    if (error) throw error;
+    return data;
+  },
+
+  updateMatchTimer: async (matchId: string, secondsRemaining: number) => {
+    const { error } = await supabase
+      .from("matches")
+      .update({
+        duration_seconds: secondsRemaining,
+        last_active_at: new Date().toISOString(), // <--- O SEGREDO ESTÁ AQUI
+      })
+      .eq("id", matchId);
+
+    if (error) console.error("Erro ao salvar timer:", error);
+  },
+
+  // 7. Deletar Evento (Correção)
+  deleteEvent: async (eventId: string) => {
+    const { error } = await supabase
+      .from("match_events")
+      .delete()
+      .eq("id", eventId);
+    if (error) throw error;
+  },
+
+  // 8. Encerrar Partida
   finishMatch: async (matchId: string, winnerColor: string | null) => {
     const { error } = await supabase
       .from("matches")
       .update({
         status: "FINISHED",
         winner_color: winnerColor,
-        duration_seconds: 0,
+        duration_seconds: 0, // Zera o tempo ou salva o restante
       })
       .eq("id", matchId);
+    if (error) throw error;
+  },
+
+  finishAllActiveMatches: async () => {
+    const { error } = await supabase
+      .from("matches")
+      .update({
+        status: "FINISHED",
+        last_active_at: new Date().toISOString(),
+      })
+      .eq("status", "IN_PROGRESS"); // Pega TUDO que estiver aberto
+
     if (error) throw error;
   },
 };
