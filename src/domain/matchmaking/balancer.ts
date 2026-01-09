@@ -1,6 +1,6 @@
 import { type Player, type Team } from '../../types';
 
-export const PLAYERS_PER_TEAM = 5; // Ajuste conforme seu jogo (5, 6, 7...)
+export const PLAYERS_PER_TEAM = 6; // Ajuste conforme seu jogo (5, 6, 7...)
 
 export const generateTeams = (checkedInPlayers: Player[]): { red: Team, blue: Team, queue: Team[] } => {
   // 1. Validação

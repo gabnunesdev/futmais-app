@@ -1,213 +1,309 @@
-import { useState, useEffect } from "react";
-import Layout from "../components/Layout";
-import { playerService } from "../services/playerService";
-import {
-  generateTeams,
-  PLAYERS_PER_TEAM,
-} from "../domain/matchmaking/balancer";
-import { type Player, type MatchState, type Team } from "../types";
-import { Play, Timer, RotateCcw, Plus, Trophy, UserCheck } from "lucide-react"; //
+import { useState, useEffect } from 'react';
+import Layout from '../components/Layout';
+import GoalModal from '../components/GoalModal';
+import { playerService } from '../services/playerService';
+import { matchService } from '../services/matchService';
+import { generateTeams, PLAYERS_PER_TEAM } from '../domain/matchmaking/balancer';
+import { type Player, type MatchState, type Team } from '../types';
+import { Play, RotateCcw, UserCheck, Loader2, ArrowRightLeft, Plus, CheckCircle2 } from 'lucide-react';
+
+// --- TIPOS LOCAIS ---
+type ViewState = 'LOBBY' | 'DRAFT' | 'MATCH';
+type PlayerStats = { goals: number; assists: number };
+
+// Interfaces para os Subcomponentes (Clean Code: Tipagem Explícita)
+interface DraftColumnProps {
+  title: string;
+  color: 'red' | 'blue';
+  players: Player[];
+  onMove: (playerId: string) => void;
+  onKick: (playerId: string) => void;
+}
+
+interface ActiveTeamCardProps {
+  color: 'red' | 'blue';
+  team: Team;
+  score: number;
+  stats: Record<string, PlayerStats>;
+  onGoal: () => void;
+}
 
 export default function Dashboard() {
-  // --- ESTADO GERAL ---
-  const [view, setView] = useState<"LOBBY" | "MATCH">("LOBBY");
+  // --- ESTADOS ---
+  const [view, setView] = useState<ViewState>('LOBBY');
+  const [loading, setLoading] = useState(true);
+  
+  // Dados Mestre
   const [allPlayers, setAllPlayers] = useState<Player[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
-  // --- ESTADO DA PARTIDA ---
-  const [gameState, setGameState] = useState<MatchState | null>(null);
+  // Estado do Draft
+  const [draftState, setDraftState] = useState<{ red: Player[], blue: Player[], queue: Player[] } | null>(null);
 
-  // Carregar jogadores ao iniciar
+  // Estado da Partida Ativa
+  const [gameState, setGameState] = useState<MatchState | null>(null);
+  const [currentMatchId, setCurrentMatchId] = useState<string | null>(null);
+  
+  // Estado Visual
+  const [matchStats, setMatchStats] = useState<Record<string, PlayerStats>>({});
+
+  // Modais
+  const [goalModalOpen, setGoalModalOpen] = useState(false);
+  const [goalTeamColor, setGoalTeamColor] = useState<'red' | 'blue' | null>(null);
+
+  // --- 1. CARREGAMENTO INICIAL ---
   useEffect(() => {
-    playerService.getAll().then(setAllPlayers);
+    loadInitialData();
   }, []);
 
-  // --- LÓGICA DO LOBBY (CHECK-IN) ---
-  const togglePlayerSelection = (id: string) => {
-    if (selectedIds.includes(id)) {
-      // Se já tá marcado, remove (desistiu ou clicou errado)
-      setSelectedIds(selectedIds.filter((selectedId) => selectedId !== id));
-    } else {
-      // Se não tá, adiciona no FINAL da lista (Chegou agora)
-      setSelectedIds([...selectedIds, id]);
-    }
-  };
-
-  const handleStartGame = () => {
+ const loadInitialData = async () => {
     try {
-      // MÁGICA AQUI: Mapeamos o array de IDs (que está na ordem de clique)
-      // para os objetos de jogadores. Assim a ordem de chegada é preservada!
-      const checkedIn = selectedIds
-        .map((id) => allPlayers.find((p) => p.id === id))
-        .filter((p) => p !== undefined) as Player[];
+      setLoading(true);
+      const players = await playerService.getAll();
+      setAllPlayers(players);
 
-      const { red, blue, queue } = generateTeams(checkedIn);
+      const activeMatch = await matchService.getActiveMatch();
+      
+      if (activeMatch) {
+        // CORREÇÃO AQUI: Tipagem explícita em todos os 'p'
+        const redPlayers = activeMatch.team_red_ids
+            .map((id: string) => players.find((p: Player) => p.id === id))
+            .filter((p: Player | undefined): p is Player => !!p);
 
-      setGameState({
-        red,
-        blue,
-        queue,
-        scoreRed: 0,
-        scoreBlue: 0,
-        timer: 600, // 10 minutos
-        isRunning: false,
-        period: 1,
-      });
+        const bluePlayers = activeMatch.team_blue_ids
+            .map((id: string) => players.find((p: Player) => p.id === id))
+            .filter((p: Player | undefined): p is Player => !!p);
+        
+        const playingIds = [...activeMatch.team_red_ids, ...activeMatch.team_blue_ids];
+        
+        // CORREÇÃO AQUI TAMBÉM: Tipagem explícita no filter da fila
+        const queuePlayers = players.filter((p: Player) => !playingIds.includes(p.id) && p.is_active);
 
-      setView("MATCH");
-    } catch (error) {
-      // Correção do 'any': Tratamos o erro como Error padrão
-      if (error instanceof Error) {
-        alert(error.message);
-      } else {
-        alert("Erro desconhecido ao iniciar jogo");
-      }
-    }
-  };
-
-  // --- LÓGICA DA PARTIDA (TIMER) ---
-  useEffect(() => {
-    // Correção da tipagem do intervalo
-    let interval: ReturnType<typeof setInterval>;
-
-    // Simplificamos a condição para depender APENAS de isRunning
-    // A lógica de "timer > 0" agora vive dentro do setGameState para evitar dependências cíclicas
-    if (gameState?.isRunning) {
-      interval = setInterval(() => {
-        setGameState((prev) => {
-          if (!prev) return null;
-
-          // Se o tempo acabou, para tudo
-          if (prev.timer <= 0) {
-            return { ...prev, timer: 0, isRunning: false };
-          }
-
-          return { ...prev, timer: prev.timer - 1 };
+        const events = await matchService.getMatchEvents(activeMatch.id);
+        const stats: Record<string, PlayerStats> = {};
+        
+        // CORREÇÃO OPCIONAL: Tipagem explícita no evento se precisar
+        events?.forEach((ev) => { // Use 'any' ou a interface MatchEvent se tiver criada
+          if (!stats[ev.player_id]) stats[ev.player_id] = { goals: 0, assists: 0 };
+          if (ev.event_type === 'GOAL') stats[ev.player_id].goals++;
+          if (ev.event_type === 'ASSIST') stats[ev.player_id].assists++;
         });
-      }, 1000);
+
+        setMatchStats(stats);
+        setCurrentMatchId(activeMatch.id);
+        setGameState({
+          red: { name: 'Time Vermelho', players: redPlayers },
+          blue: { name: 'Time Azul', players: bluePlayers },
+          queue: [{ name: 'Próximos', players: queuePlayers }],
+          scoreRed: activeMatch.score_red,
+          scoreBlue: activeMatch.score_blue,
+          timer: activeMatch.duration_seconds || 600,
+          isRunning: false,
+          period: 1
+        });
+        setView('MATCH');
+      }
+    } catch (error) {
+      console.error(error);
+      alert('Erro ao carregar dados.');
+    } finally {
+      setLoading(false);
     }
-
-    return () => clearInterval(interval);
-  }, [gameState?.isRunning]); // Dependência limpa!
-
-  // Formata MM:SS
-  const formatTime = (seconds: number) => {
-    const m = Math.floor(seconds / 60)
-      .toString()
-      .padStart(2, "0");
-    const s = (seconds % 60).toString().padStart(2, "0");
-    return `${m}:${s}`;
   };
 
-  // --- AÇÕES DO JOGO ---
-  const handleGoal = (team: "red" | "blue", delta: number) => {
-    if (!gameState) return;
-    setGameState((prev) => {
-      if (!prev) return null;
-      const key = team === "red" ? "scoreRed" : "scoreBlue";
-      const newScore = Math.max(0, prev[key] + delta);
-      return { ...prev, [key]: newScore };
+  // --- 2. LÓGICA DO LOBBY ---
+  const togglePlayerSelection = (id: string) => {
+    if (selectedIds.includes(id)) setSelectedIds(selectedIds.filter(pid => pid !== id));
+    else setSelectedIds([...selectedIds, id]);
+  };
+
+  const handleGoToDraft = () => {
+    const checkedIn = selectedIds
+        .map(id => allPlayers.find(p => p.id === id))
+        .filter((p): p is Player => p !== undefined);
+
+    const { red, blue, queue } = generateTeams(checkedIn);
+    const queuePlayers = queue.flatMap(t => t.players);
+
+    setDraftState({ red: red.players, blue: blue.players, queue: queuePlayers });
+    setView('DRAFT');
+  };
+
+  // --- 3. LÓGICA DO DRAFT ---
+  const movePlayer = (playerId: string, from: 'red' | 'blue' | 'queue', to: 'red' | 'blue' | 'queue') => {
+    if (!draftState) return;
+    
+    const player = draftState[from].find(p => p.id === playerId);
+    if (!player) return;
+
+    setDraftState({
+      ...draftState,
+      [from]: draftState[from].filter(p => p.id !== playerId),
+      [to]: [...draftState[to], player]
     });
   };
 
-  const handleEndMatch = () => {
-    if (!gameState) return;
-    if (!confirm("Encerrar partida e rodar a fila?")) return;
+  const confirmMatchStart = async () => {
+    if (!draftState) return;
+    setLoading(true);
 
-    const redWins = gameState.scoreRed > gameState.scoreBlue;
-    const isDraw = gameState.scoreRed === gameState.scoreBlue;
+    try {
+      const matchData = await matchService.startMatch(
+        draftState.red.map(p => p.id),
+        draftState.blue.map(p => p.id)
+      );
 
-    // Regra: Empate, o Vermelho (Mandante) fica. Ajuste conforme sua regra real.
-    const winnerTeam = redWins || isDraw ? gameState.red : gameState.blue;
-    const loserTeam = redWins || isDraw ? gameState.blue : gameState.red;
+      setCurrentMatchId(matchData.id);
 
-    const nextTeam = gameState.queue.length > 0 ? gameState.queue[0] : null;
-    const remainingQueue = gameState.queue.slice(1);
+      const queueTeams: Team[] = [];
+      for (let i = 0; i < draftState.queue.length; i += PLAYERS_PER_TEAM) {
+         queueTeams.push({ 
+           name: `Time ${3 + queueTeams.length}`, 
+           players: draftState.queue.slice(i, i + PLAYERS_PER_TEAM) 
+         });
+      }
 
-    const newQueue = nextTeam
-      ? [
-          ...remainingQueue,
-          { ...loserTeam, name: `Time ${3 + remainingQueue.length + 1}` },
-        ]
-      : [];
-
-    if (nextTeam) {
       setGameState({
-        red: { ...winnerTeam, name: "Time Vermelho" },
-        blue: { ...nextTeam, name: "Time Azul" },
-        queue: newQueue,
+        red: { name: 'Time Vermelho', players: draftState.red },
+        blue: { name: 'Time Azul', players: draftState.blue },
+        queue: queueTeams,
         scoreRed: 0,
         scoreBlue: 0,
         timer: 600,
         isRunning: false,
-        period: 1,
+        period: 1
       });
-    } else {
-      alert("Sem próximo time. Revanche!");
-      setGameState((prev) =>
-        prev
-          ? { ...prev, scoreRed: 0, scoreBlue: 0, timer: 600, isRunning: false }
-          : null
-      );
+
+      setMatchStats({});
+      setView('MATCH');
+    } catch (err) {
+      console.error(err)
+      alert('Erro ao iniciar partida');
+    } finally {
+      setLoading(false);
     }
   };
 
-  // --- RENDERIZAÇÃO ---
+  // --- 4. LÓGICA DA PARTIDA ---
+  useEffect(() => {
+    let interval: ReturnType<typeof setInterval>;
+    if (gameState?.isRunning) {
+      interval = setInterval(() => {
+        setGameState(prev => {
+          if (!prev) return null;
+          if (prev.timer <= 0) return { ...prev, timer: 0, isRunning: false };
+          return { ...prev, timer: prev.timer - 1 };
+        });
+      }, 1000);
+    }
+    return () => clearInterval(interval);
+  }, [gameState?.isRunning]);
 
-  if (view === "LOBBY") {
+  const handleGoalClick = (team: 'red' | 'blue') => {
+    setGoalTeamColor(team);
+    setGoalModalOpen(true);
+  };
+
+  const handleConfirmGoal = async (scorerId: string, assistId: string | null) => {
+    if (!gameState || !currentMatchId || !goalTeamColor) return;
+
+    setGameState(prev => {
+      if (!prev) return null;
+      const key = goalTeamColor === 'red' ? 'scoreRed' : 'scoreBlue';
+      return { ...prev, [key]: prev[key] + 1 };
+    });
+
+    setMatchStats(prev => {
+      const stats = { ...prev };
+      if (!stats[scorerId]) stats[scorerId] = { goals: 0, assists: 0 };
+      stats[scorerId].goals += 1;
+      
+      if (assistId) {
+        if (!stats[assistId]) stats[assistId] = { goals: 0, assists: 0 };
+        stats[assistId].assists += 1;
+      }
+      return stats;
+    });
+
+    try {
+      await matchService.registerGoal(currentMatchId, scorerId, assistId);
+      const newScoreRed = goalTeamColor === 'red' ? gameState.scoreRed + 1 : gameState.scoreRed;
+      const newScoreBlue = goalTeamColor === 'blue' ? gameState.scoreBlue + 1 : gameState.scoreBlue;
+      await matchService.updateScore(currentMatchId, newScoreRed, newScoreBlue);
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
+  const handleEndMatch = async () => {
+    if (!gameState || !currentMatchId) return;
+    if (!confirm('Encerrar partida? O vencedor será mantido.')) return;
+
+    try {
+      const redWins = gameState.scoreRed > gameState.scoreBlue;
+      const isDraw = gameState.scoreRed === gameState.scoreBlue;
+      const winnerColor = isDraw ? 'DRAW' : (redWins ? 'RED' : 'BLUE');
+
+      await matchService.finishMatch(currentMatchId, winnerColor);
+      setCurrentMatchId(null);
+
+      const winnerTeam = redWins || isDraw ? gameState.red : gameState.blue;
+      const loserTeam = redWins || isDraw ? gameState.blue : gameState.red;
+      
+      const nextTeam = gameState.queue[0];
+      const remainingQueue = gameState.queue.slice(1);
+      
+      const newQueue = nextTeam 
+        ? [...remainingQueue, { ...loserTeam, name: `Time ${3 + remainingQueue.length + 1}` }]
+        : [];
+
+      if (nextTeam) {
+        setDraftState({
+          red: { ...winnerTeam, name: 'Time Vermelho' }.players,
+          blue: { ...nextTeam, name: 'Time Azul' }.players,
+          queue: newQueue.flatMap(t => t.players)
+        });
+        setView('DRAFT');
+      } else {
+        alert('Fim dos times. Revanche!');
+        setGameState(prev => prev ? ({ ...prev, scoreRed: 0, scoreBlue: 0, timer: 600, isRunning: false }) : null);
+        setMatchStats({});
+        const matchData = await matchService.startMatch(gameState.red.players.map(p=>p.id), gameState.blue.players.map(p=>p.id));
+        setCurrentMatchId(matchData.id);
+      }
+    } catch (err) {
+      console.error(err)
+      alert('Erro ao finalizar.');
+    }
+  };
+
+  if (loading) return <Layout title="Carregando..."><div className="flex justify-center p-10"><Loader2 className="animate-spin"/></div></Layout>;
+
+  // VIEW 1: LOBBY
+  if (view === 'LOBBY') {
     return (
-      <Layout title="Check-in">
+      <Layout title="Check-in do Racha">
         <div className="bg-white p-6 rounded-xl shadow-sm">
-          <h3 className="font-bold text-slate-700 mb-4 flex items-center gap-2">
-            <UserCheck /> Quem vai jogar hoje?
+           <h3 className="font-bold text-slate-700 mb-4 flex items-center gap-2">
+            <UserCheck /> Presença
           </h3>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 mb-6 max-h-[60vh] overflow-y-auto">
-            {allPlayers.map((player) => (
-              <label
-                key={player.id}
-                className={`relative flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all ${
-                  selectedIds.includes(player.id) // Mudou de .has para .includes
-                    ? "bg-blue-50 border-blue-500 ring-1 ring-blue-500"
-                    : "bg-slate-50 border-slate-200 hover:bg-slate-100"
-                }`}
-              >
-                {/* BADGE DE ORDEM DE CHEGADA */}
-                {selectedIds.includes(player.id) && (
-                  <div className="absolute -top-2 -right-2 bg-blue-600 text-white text-xs font-bold w-6 h-6 flex items-center justify-center rounded-full shadow-sm z-10">
-                    {selectedIds.indexOf(player.id) + 1}º
-                  </div>
-                )}
-
-                <input
-                  type="checkbox"
-                  className="w-5 h-5 rounded text-blue-600 focus:ring-blue-500"
-                  checked={selectedIds.includes(player.id)}
-                  onChange={() => togglePlayerSelection(player.id)}
-                />
-                <div className="flex flex-col">
-                  <span className="font-semibold text-slate-800">
-                    {player.name}
-                  </span>
-                  <span className="text-xs text-slate-500">
-                    ⭐ {player.stars}
-                  </span>
-                </div>
-              </label>
-            ))}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+            {allPlayers.map(player => {
+               const isSelected = selectedIds.includes(player.id);
+               const order = isSelected ? selectedIds.indexOf(player.id) + 1 : null;
+               return (
+                 <label key={player.id} className={`relative p-3 rounded-lg border cursor-pointer select-none ${isSelected ? 'bg-blue-50 border-blue-500' : 'bg-slate-50'}`}>
+                    {order && <div className="absolute -top-2 -right-2 bg-blue-600 text-white text-xs w-6 h-6 flex items-center justify-center rounded-full">{order}º</div>}
+                    <input type="checkbox" className="hidden" checked={isSelected} onChange={() => togglePlayerSelection(player.id)} />
+                    <div className="font-bold text-slate-800">{player.name}</div>
+                    <div className="text-xs text-slate-500">⭐ {player.stars}</div>
+                 </label>
+               )
+            })}
           </div>
-
-          <div className="flex justify-between items-center border-t pt-4">
-            <div className="text-sm text-slate-500">
-              {selectedIds.length} jogadores selecionados (
-              {Math.floor(selectedIds.length / PLAYERS_PER_TEAM)} times completos)
-            </div>
-            <button
-              onClick={handleStartGame}
-              disabled={selectedIds.length < PLAYERS_PER_TEAM * 2}
-              className="bg-blue-600 text-white px-6 py-3 rounded-lg font-bold shadow hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-            >
-              <Trophy size={20} />
-              Sortear e Iniciar
+          <div className="flex justify-end">
+            <button onClick={handleGoToDraft} disabled={selectedIds.length < PLAYERS_PER_TEAM * 2} className="bg-blue-600 text-white px-6 py-3 rounded-lg font-bold flex items-center gap-2 disabled:opacity-50">
+              <ArrowRightLeft size={20} /> Montar Times
             </button>
           </div>
         </div>
@@ -215,173 +311,153 @@ export default function Dashboard() {
     );
   }
 
-  // VIEW MATCH
-  return (
-    <Layout
-      title="Partida"
-      action={
-        <button
-          onClick={() => setView("LOBBY")}
-          className="text-sm text-red-500 hover:underline"
-        >
-          Cancelar Jogo
-        </button>
-      }
-    >
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-        <TeamCard
-          color="red"
-          team={gameState!.red}
-          score={gameState!.scoreRed}
-          onGoal={(d) => handleGoal("red", d)}
-        />
+  // VIEW 2: DRAFT
+  if (view === 'DRAFT' && draftState) {
+    return (
+      <Layout title="Ajuste os Times" action={<button onClick={() => setView('LOBBY')} className="text-red-500 text-sm">Voltar</button>}>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <DraftColumn 
+            title="Time Vermelho" 
+            color="red" 
+            players={draftState.red} 
+            onMove={(pid) => movePlayer(pid, 'red', 'blue')} 
+            onKick={(pid) => movePlayer(pid, 'red', 'queue')}
+          />
 
-        <div className="flex flex-col items-center justify-start gap-4">
-          <div className="bg-slate-900 text-white p-6 rounded-2xl w-full text-center shadow-lg relative overflow-hidden">
-            <div className="flex items-center justify-center gap-2 mb-2 text-yellow-400 opacity-80">
-              {/* Reintegrando o ícone Timer para não dar erro de unused */}
-              <Timer size={20} />
-              <span className="text-xs font-bold tracking-widest uppercase">
-                Cronômetro
-              </span>
-            </div>
-            <div className="text-6xl font-mono font-bold tracking-tighter mb-4">
-              {formatTime(gameState!.timer)}
-            </div>
-            <div className="flex justify-center gap-2">
-              <button
-                onClick={() =>
-                  setGameState((p) =>
-                    p ? { ...p, isRunning: !p.isRunning } : null
-                  )
-                }
-                className={`p-3 rounded-full transition-colors ${
-                  gameState?.isRunning
-                    ? "bg-yellow-500 text-black hover:bg-yellow-400"
-                    : "bg-green-600 text-white hover:bg-green-500"
-                }`}
-              >
-                {gameState?.isRunning ? (
-                  <Play className="fill-current" size={24} />
-                ) : (
-                  <Play size={24} />
-                )}
-              </button>
-              <button
-                onClick={() =>
-                  setGameState((p) =>
-                    p ? { ...p, timer: 600, isRunning: false } : null
-                  )
-                }
-                className="p-3 bg-slate-700 rounded-full text-slate-300 hover:bg-slate-600 transition-colors"
-              >
-                <RotateCcw size={24} />
-              </button>
+           <DraftColumn 
+            title="Time Azul" 
+            color="blue" 
+            players={draftState.blue} 
+            onMove={(pid) => movePlayer(pid, 'blue', 'red')}
+            onKick={(pid) => movePlayer(pid, 'blue', 'queue')}
+          />
+
+          <div className="bg-slate-100 p-4 rounded-xl border border-slate-200">
+            <h3 className="font-bold text-slate-600 mb-3">Banco / Fila</h3>
+            <div className="space-y-2">
+              {draftState.queue.map(p => (
+                <div key={p.id} className="bg-white p-2 rounded border flex justify-between items-center">
+                  <span>{p.name}</span>
+                  <div className="flex gap-1">
+                    <button onClick={() => movePlayer(p.id, 'queue', 'red')} className="text-xs bg-red-100 text-red-600 px-2 py-1 rounded">V</button>
+                    <button onClick={() => movePlayer(p.id, 'queue', 'blue')} className="text-xs bg-blue-100 text-blue-600 px-2 py-1 rounded">A</button>
+                  </div>
+                </div>
+              ))}
+              {draftState.queue.length === 0 && <p className="text-xs text-slate-400">Ninguém no banco.</p>}
             </div>
           </div>
-
-          <button
-            onClick={handleEndMatch}
-            className="w-full py-3 bg-slate-800 text-white rounded-xl font-bold hover:bg-slate-700 transition-colors shadow-lg"
-          >
-            Encerrar Partida 🏁
-          </button>
         </div>
 
-        <TeamCard
-          color="blue"
-          team={gameState!.blue}
-          score={gameState!.scoreBlue}
-          onGoal={(d) => handleGoal("blue", d)}
+        <div className="mt-6 flex justify-center">
+            <button onClick={confirmMatchStart} className="bg-green-600 text-white px-8 py-3 rounded-xl font-bold text-lg shadow-lg active:scale-95 transition-transform flex items-center gap-2">
+              <CheckCircle2 /> Confirmar e Jogar
+            </button>
+        </div>
+      </Layout>
+    );
+  }
+
+  // VIEW 3: MATCH
+  return (
+    <Layout title="Partida em Andamento">
+       <GoalModal 
+        isOpen={goalModalOpen}
+        onClose={() => setGoalModalOpen(false)}
+        onConfirm={handleConfirmGoal}
+        teamName={goalTeamColor === 'red' ? 'Vermelho' : 'Azul'}
+        players={goalTeamColor === 'red' ? gameState!.red.players : gameState!.blue.players}
+      />
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <ActiveTeamCard 
+          color="red" 
+          team={gameState!.red} 
+          score={gameState!.scoreRed} 
+          stats={matchStats} 
+          onGoal={() => handleGoalClick('red')}
         />
-      </div>
 
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
-        <h3 className="font-bold text-slate-700 mb-4 flex items-center gap-2">
-          <span className="w-2 h-6 bg-yellow-400 rounded-full"></span>
-          Próximos da Fila ({gameState!.queue.length} times)
-        </h3>
-        <div className="flex flex-wrap gap-4">
-          {gameState!.queue.length === 0 && (
-            <p className="text-slate-400">Ninguém esperando.</p>
-          )}
-          {gameState!.queue.map((team, idx) => (
-            <div
-              key={idx}
-              className="bg-slate-50 p-3 rounded-lg border border-slate-200 min-w-50"
-            >
-              <div className="font-bold text-slate-700 mb-2 border-b pb-1">
-                {team.name}
+        <div className="flex flex-col items-center">
+           <div className="bg-slate-900 text-white p-6 rounded-2xl w-full text-center mb-4">
+              <div className="text-5xl font-mono font-bold">{Math.floor(gameState!.timer / 60).toString().padStart(2, '0')}:{(gameState!.timer % 60).toString().padStart(2, '0')}</div>
+              <div className="flex justify-center gap-4 mt-4">
+                <button onClick={() => setGameState(p => p ? {...p, isRunning: !p.isRunning} : null)} className="p-3 bg-yellow-500 rounded-full text-black"><Play size={24}/></button>
+                <button onClick={() => setGameState(p => p ? {...p, timer: 600, isRunning: false} : null)} className="p-3 bg-slate-700 rounded-full"><RotateCcw size={24}/></button>
               </div>
-              <ul className="text-sm text-slate-500 space-y-1">
-                {team.players.map((p) => (
-                  <li key={p.id}>• {p.name}</li>
-                ))}
-              </ul>
-            </div>
-          ))}
+           </div>
+           <button onClick={handleEndMatch} className="w-full py-4 bg-slate-800 text-white rounded-xl font-bold">Encerrar Jogo</button>
         </div>
+
+        <ActiveTeamCard 
+          color="blue" 
+          team={gameState!.blue} 
+          score={gameState!.scoreBlue} 
+          stats={matchStats} 
+          onGoal={() => handleGoalClick('blue')}
+        />
       </div>
     </Layout>
   );
 }
 
-// Subcomponente
-const TeamCard = ({
-  color,
-  team,
-  score,
-  onGoal,
-}: {
-  color: "red" | "blue";
-  team: Team;
-  score: number;
-  onGoal: (d: number) => void;
-}) => {
-  const isRed = color === "red";
-  const borderColor = isRed ? "border-red-500" : "border-blue-500";
-  const textColor = isRed ? "text-red-600" : "text-blue-600";
-  const bgColor = isRed ? "bg-red-50" : "bg-blue-50";
+// --- SUBCOMPONENTES AUXILIARES TIPADOS ---
 
+// ... imports
+// Certifique-se que PLAYERS_PER_TEAM está importado lá em cima:
+// import { generateTeams, PLAYERS_PER_TEAM } from '../domain/matchmaking/balancer';
+
+// ...
+
+const DraftColumn = ({ title, color, players, onMove, onKick }: DraftColumnProps) => (
+  <div className={`p-4 rounded-xl border-t-4 bg-white shadow-sm ${color === 'red' ? 'border-red-500' : 'border-blue-500'}`}>
+    <h3 className={`font-bold uppercase text-sm mb-3 ${color === 'red' ? 'text-red-600' : 'text-blue-600'}`}>{title} ({players.length})</h3>
+    <div className="space-y-2">
+      {players.map((p: Player) => (
+        <div key={p.id} className="flex justify-between items-center text-sm p-2 bg-slate-50 rounded border border-slate-100">
+           <span>{p.name}</span>
+           <div className="flex gap-1">
+             <button onClick={() => onMove(p.id)} title="Trocar de time" className="p-1 hover:bg-slate-200 rounded"><ArrowRightLeft size={14}/></button>
+             <button onClick={() => onKick(p.id)} title="Mandar pro banco" className="p-1 hover:bg-red-100 text-red-500 rounded">X</button>
+           </div>
+        </div>
+      ))}
+      
+      {/* CORREÇÃO AQUI: Usar PLAYERS_PER_TEAM em vez de número fixo */}
+      {[...Array(Math.max(0, PLAYERS_PER_TEAM - players.length))].map((_, i) => (
+        <div key={i} className="h-9 border-2 border-dashed border-slate-100 rounded flex items-center justify-center text-xs text-slate-300">Vaga aberta</div>
+      ))}
+    </div>
+  </div>
+);
+
+const ActiveTeamCard = ({ color, team, score, stats, onGoal }: ActiveTeamCardProps) => {
+  const isRed = color === 'red';
   return (
-    <div
-      className={`bg-white rounded-2xl p-4 shadow-sm border-t-4 ${borderColor} flex flex-col h-full`}
-    >
-      <h3
-        className={`${textColor} font-bold uppercase tracking-wider text-sm mb-1`}
-      >
-        {team.name}
-      </h3>
-      <div className="mb-4">
-        {team.players.map((p) => (
-          <div
-            key={p.id}
-            className="text-xs text-slate-600 font-medium border-b border-slate-50 last:border-0 py-1"
-          >
-            {p.name}
-          </div>
-        ))}
-      </div>
+    <div className={`bg-white rounded-2xl p-4 shadow-sm border-t-4 ${isRed ? 'border-red-500' : 'border-blue-500'} flex flex-col h-full`}>
+       <div className="flex justify-between items-center mb-4">
+          <h3 className={`font-bold uppercase ${isRed ? 'text-red-600' : 'text-blue-600'}`}>{team.name}</h3>
+          <span className="text-4xl font-black text-slate-800">{score}</span>
+       </div>
+       
+       <div className="flex-1 space-y-2 mb-4">
+         {team.players.map((p) => {
+           const pStats = stats[p.id] || { goals: 0, assists: 0 };
+           return (
+             <div key={p.id} className="flex items-center justify-between text-sm border-b border-slate-50 pb-1">
+               <span className="text-slate-700 font-medium">{p.name}</span>
+               <div className="flex gap-1">
+                 {[...Array(pStats.goals)].map((_, i) => <span key={`g-${i}`} title="Gol">⚽</span>)}
+                 {[...Array(pStats.assists)].map((_, i) => <span key={`a-${i}`} title="Assistência">👟</span>)}
+               </div>
+             </div>
+           );
+         })}
+       </div>
 
-      <div className="mt-auto">
-        <div className="text-6xl font-black text-slate-800 mb-4 text-center">
-          {score}
-        </div>
-        <div className="flex gap-2">
-          <button
-            onClick={() => onGoal(-1)}
-            className="flex-1 py-2 bg-slate-100 text-slate-600 rounded-lg font-bold hover:bg-slate-200 transition-colors"
-          >
-            -
-          </button>
-          <button
-            onClick={() => onGoal(1)}
-            className={`flex-2 py-2 ${bgColor} ${textColor} rounded-lg font-bold flex items-center justify-center gap-2 hover:brightness-95 transition-all active:scale-95`}
-          >
-            <Plus size={18} /> GOL
-          </button>
-        </div>
-      </div>
+       <button onClick={onGoal} className={`w-full py-3 rounded-xl font-bold flex justify-center gap-2 ${isRed ? 'bg-red-50 text-red-600' : 'bg-blue-50 text-blue-600'}`}>
+         <Plus size={18}/> GOL
+       </button>
     </div>
   );
-};
+}
