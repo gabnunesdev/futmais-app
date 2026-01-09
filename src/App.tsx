@@ -1,28 +1,24 @@
-import React from "react"; // Importante adicionar o React aqui
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import { AuthProvider } from "./context/AuthContext";
-import { useAuth } from "./hooks/useAuth"; // Note que o import mudou para hooks
-import Login from "./pages/Login";
-import Dashboard from "./pages/Dashboard";
-import Players from "./pages/Players";
+import React from 'react';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { AuthProvider } from './context/AuthContext';
+import { useAuth } from './hooks/useAuth';
+import Login from './pages/Login';
+import Home from './pages/Home';      // Nova Importação
+import Dashboard from './pages/Dashboard'; // O antigo Dashboard (agora será /match)
+import Players from './pages/Players';
 
-// Mudamos o tipo de JSX.Element para React.ReactNode (padrão da indústria)
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   const { session, loading } = useAuth();
 
   if (loading) {
-    return (
-      <div className="h-screen flex items-center justify-center">
-        Carregando...
-      </div>
-    );
+    return <div className="h-screen flex items-center justify-center bg-slate-50">Carregando...</div>;
   }
 
   if (!session) {
     return <Navigate to="/login" replace />;
   }
 
-  return <>{children}</>; // Fragmento para garantir retorno válido
+  return <>{children}</>;
 };
 
 function App() {
@@ -31,22 +27,14 @@ function App() {
       <AuthProvider>
         <Routes>
           <Route path="/login" element={<Login />} />
-          <Route
-            path="/"
-            element={
-              <ProtectedRoute>
-                <Dashboard />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/players"
-            element={
-              <ProtectedRoute>
-                <Players />
-              </ProtectedRoute>
-            }
-          />
+          
+          {/* Rotas Protegidas */}
+          <Route path="/" element={<ProtectedRoute><Home /></ProtectedRoute>} />
+          <Route path="/match" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} /> {/* Mudou para /match */}
+          <Route path="/players" element={<ProtectedRoute><Players /></ProtectedRoute>} />
+          
+          {/* Rota coringa para redirecionar erros para a home */}
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </AuthProvider>
     </BrowserRouter>
