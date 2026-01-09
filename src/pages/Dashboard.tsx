@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom"; // Importante para voltar pra Home
 import Layout from "../components/Layout";
 import GoalModal from "../components/GoalModal";
 import EventHistoryModal from "../components/EventHistoryModal";
@@ -22,11 +22,16 @@ import {
   UserPlus,
   X,
   History,
+  Trophy,
+  AlertTriangle,
+  Share2,
+  LogOut,
 } from "lucide-react";
 
 // --- TIPOS LOCAIS ---
 type ViewState = "LOBBY" | "DRAFT" | "MATCH";
 type PlayerStats = { goals: number; assists: number };
+type GameOverReason = "GOAL_LIMIT" | "TIME_LIMIT" | "PENALTIES" | null;
 
 interface DraftColumnProps {
   title: string;
@@ -44,7 +49,107 @@ interface ActiveTeamCardProps {
   onGoal: () => void;
 }
 
-// Modal Interno para Adicionar Atrasados
+// --- MODAL DE FIM DE JOGO / PÊNALTIS ---
+const GameOverModal = ({
+  isOpen,
+  reason,
+  scoreRed,
+  scoreBlue,
+  onConfirm,
+}: {
+  isOpen: boolean;
+  reason: GameOverReason;
+  scoreRed: number;
+  scoreBlue: number;
+  onConfirm: (winner: "RED" | "BLUE" | "DRAW") => void;
+}) => {
+  if (!isOpen) return null;
+
+  const isDraw = scoreRed === scoreBlue;
+  const leader = scoreRed > scoreBlue ? "RED" : "BLUE";
+
+  return (
+    <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden text-center p-6 animate-in zoom-in-95">
+        <div className="mb-4 flex justify-center">
+          {reason === "PENALTIES" ? (
+            <div className="p-4 bg-yellow-100 rounded-full text-yellow-600">
+              <AlertTriangle size={40} />
+            </div>
+          ) : (
+            <div className="p-4 bg-green-100 rounded-full text-green-600">
+              <Trophy size={40} />
+            </div>
+          )}
+        </div>
+
+        <h2 className="text-2xl font-black text-slate-800 mb-2">
+          FIM DE JOGO!
+        </h2>
+
+        {reason === "GOAL_LIMIT" && (
+          <p className="text-slate-600 mb-6">
+            Limite de 2 gols atingido.
+            <br />
+            Vitória do time <b>{leader === "RED" ? "Vermelho" : "Azul"}</b>.
+          </p>
+        )}
+
+        {reason === "TIME_LIMIT" && !isDraw && (
+          <p className="text-slate-600 mb-6">
+            Tempo esgotado.
+            <br />
+            Vitória do time <b>{leader === "RED" ? "Vermelho" : "Azul"}</b>.
+          </p>
+        )}
+
+        {reason === "TIME_LIMIT" && isDraw && (
+          <p className="text-slate-600 mb-6">
+            Tempo esgotado e empate.
+            <br />
+            Temos times completos fora, segue o jogo (Empate).
+          </p>
+        )}
+
+        {reason === "PENALTIES" && (
+          <p className="text-slate-600 mb-6">
+            Tempo esgotado e empate!
+            <br />
+            Pouca gente na fila. <b>Quem venceu os pênaltis?</b>
+          </p>
+        )}
+
+        <div className="space-y-3">
+          {reason === "PENALTIES" ? (
+            <>
+              <button
+                onClick={() => onConfirm("RED")}
+                className="w-full py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700"
+              >
+                Venceu VERMELHO
+              </button>
+              <button
+                onClick={() => onConfirm("BLUE")}
+                className="w-full py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700"
+              >
+                Venceu AZUL
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={() => onConfirm(isDraw ? "DRAW" : leader)}
+              className="w-full py-3 bg-slate-900 text-white font-bold rounded-xl hover:bg-slate-800"
+            >
+              Confirmar Resultado
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ... (AddLatePlayerModal mantido igual)
 const AddLatePlayerModal = ({
   isOpen,
   onClose,
@@ -57,15 +162,12 @@ const AddLatePlayerModal = ({
   onAdd: (ids: string[]) => void;
 }) => {
   const [localSelected, setLocalSelected] = useState<string[]>([]);
-
   if (!isOpen) return null;
-
   const toggle = (id: string) => {
     if (localSelected.includes(id))
       setLocalSelected(localSelected.filter((sid) => sid !== id));
     else setLocalSelected([...localSelected, id]);
   };
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95">
@@ -121,7 +223,6 @@ const AddLatePlayerModal = ({
 };
 
 export default function Dashboard() {
-  const isEndingRef = useRef(false);
   const navigate = useNavigate();
   // --- ESTADOS ---
   const [view, setView] = useState<ViewState>("LOBBY");
@@ -141,16 +242,81 @@ export default function Dashboard() {
   const [currentMatchId, setCurrentMatchId] = useState<string | null>(null);
   const [matchStats, setMatchStats] = useState<Record<string, PlayerStats>>({});
 
-  // REF para o Timer (Evita Loop de Dependência)
+  // Refs e Modais
   const gameStateRef = useRef<MatchState | null>(null);
+  const isEndingRef = useRef(false);
 
-  // Modais
   const [goalModalOpen, setGoalModalOpen] = useState(false);
   const [goalTeamColor, setGoalTeamColor] = useState<"red" | "blue" | null>(
     null
   );
   const [latePlayerModalOpen, setLatePlayerModalOpen] = useState(false);
   const [historyModalOpen, setHistoryModalOpen] = useState(false);
+
+  // Novo Estado para o Game Over Automático
+  const [gameOverReason, setGameOverReason] = useState<GameOverReason>(null);
+
+  const handleRemoveFromQueue = (playerId: string) => {
+    if (!draftState) return;
+    if (
+      !confirm(
+        "Remover este jogador do Racha? (Ele sairá da lista de presença)"
+      )
+    )
+      return;
+
+    // Remove da fila visual
+    setDraftState((prev) =>
+      prev
+        ? {
+            ...prev,
+            queue: prev.queue.filter((p) => p.id !== playerId),
+          }
+        : null
+    );
+
+    // Remove da "Verdade" (SelectedIds) para não voltar mais
+    setSelectedIds((prev) => prev.filter((id) => id !== playerId));
+  };
+
+  const handleShareTeams = () => {
+    if (!draftState) return;
+
+    const redNames = draftState.red.map((p) => p.name).join("\n🔴 ");
+    const blueNames = draftState.blue.map((p) => p.name).join("\n🔵 ");
+
+    // Formata a fila mostrando os times (Time 3, Time 4...)
+    const queueNames =
+      draftState.queue.length > 0
+        ? draftState.queue
+            .map((p, i) => {
+              // Lógica visual para quebrar em "Times" na lista de texto
+              const isCaptain = i % PLAYERS_PER_TEAM === 0;
+              const teamNum = Math.floor(i / PLAYERS_PER_TEAM) + 3;
+              return `${isCaptain ? `\n⏳ *Time ${teamNum}*:\n` : ""}▫️ ${
+                p.name
+              }`;
+            })
+            .join("")
+        : "\n(Sem fila)";
+
+    const text = `
+⚽ *TIMES DEFINIDOS* ⚽
+
+🔴 *TIME VERMELHO*
+🔴 ${redNames}
+
+🔵 *TIME AZUL*
+🔵 ${blueNames}
+
+------------------
+PRÓXIMOS:
+${queueNames}
+`.trim();
+
+    navigator.clipboard.writeText(text);
+    alert("Times copiados! Agora cole no WhatsApp.");
+  };
 
   // Sincroniza Ref
   useEffect(() => {
@@ -171,7 +337,6 @@ export default function Dashboard() {
       const activeMatch = await matchService.getActiveMatch();
 
       if (activeMatch) {
-        // ... (lógica de times igual ao anterior) ...
         const redPlayers = activeMatch.team_red_ids
           .map((id: string) => players.find((p: Player) => p.id === id))
           .filter((p: Player | undefined): p is Player => !!p);
@@ -205,21 +370,14 @@ export default function Dashboard() {
         setMatchStats(stats);
         setCurrentMatchId(activeMatch.id);
 
-        // --- CÁLCULO DO TEMPO REAL (A MÁGICA 🧙‍♂️) ---
         let calculatedTimer = activeMatch.duration_seconds ?? 600;
-
-        // Se a partida tem uma data de última atividade, calculamos a diferença
         if (activeMatch.last_active_at) {
           const lastActive = new Date(activeMatch.last_active_at).getTime();
           const now = new Date().getTime();
           const secondsPassed = Math.floor((now - lastActive) / 1000);
-
-          // Só desconta se a diferença for razoável (ex: > 1 segundo)
-          if (secondsPassed > 0) {
+          if (secondsPassed > 0)
             calculatedTimer = Math.max(0, calculatedTimer - secondsPassed);
-          }
         }
-        // ---------------------------------------------
 
         setGameState({
           red: { name: "Time Vermelho", players: redPlayers },
@@ -227,8 +385,8 @@ export default function Dashboard() {
           queue: [{ name: "Próximos", players: queuePlayers }],
           scoreRed: activeMatch.score_red,
           scoreBlue: activeMatch.score_blue,
-          timer: calculatedTimer, // Usa o tempo calculado
-          isRunning: true, // Já volta RODANDO pra não perder o ritmo!
+          timer: calculatedTimer,
+          isRunning: true,
           period: 1,
         });
         setView("MATCH");
@@ -241,30 +399,24 @@ export default function Dashboard() {
     }
   };
 
-  // --- 2. LOBBY ---
+  // ... (Lobby e Draft methods mantidos iguais - omitidos para brevidade) ...
   const togglePlayerSelection = (id: string) => {
     if (selectedIds.includes(id))
       setSelectedIds(selectedIds.filter((pid) => pid !== id));
     else setSelectedIds([...selectedIds, id]);
   };
-
   const handleGoToDraft = () => {
     const checkedIn = selectedIds
       .map((id) => allPlayers.find((p) => p.id === id))
       .filter((p): p is Player => !!p);
-
     const { red, blue, queue } = generateTeams(checkedIn);
-    const queuePlayers = queue.flatMap((t) => t.players);
-
     setDraftState({
       red: red.players,
       blue: blue.players,
-      queue: queuePlayers,
+      queue: queue.flatMap((t) => t.players),
     });
     setView("DRAFT");
   };
-
-  // --- 3. DRAFT ---
   const movePlayer = (
     playerId: string,
     from: "red" | "blue" | "queue",
@@ -273,26 +425,21 @@ export default function Dashboard() {
     if (!draftState) return;
     const player = draftState[from].find((p) => p.id === playerId);
     if (!player) return;
-
     setDraftState({
       ...draftState,
       [from]: draftState[from].filter((p) => p.id !== playerId),
       [to]: [...draftState[to], player],
     });
   };
-
   const confirmMatchStart = async () => {
     if (!draftState) return;
     setLoading(true);
-
     try {
       const matchData = await matchService.startMatch(
         draftState.red.map((p) => p.id),
         draftState.blue.map((p) => p.id)
       );
-
       setCurrentMatchId(matchData.id);
-
       const queueTeams: Team[] = [];
       for (let i = 0; i < draftState.queue.length; i += PLAYERS_PER_TEAM) {
         queueTeams.push({
@@ -300,7 +447,6 @@ export default function Dashboard() {
           players: draftState.queue.slice(i, i + PLAYERS_PER_TEAM),
         });
       }
-
       setGameState({
         red: { name: "Time Vermelho", players: draftState.red },
         blue: { name: "Time Azul", players: draftState.blue },
@@ -311,7 +457,6 @@ export default function Dashboard() {
         isRunning: false,
         period: 1,
       });
-
       setMatchStats({});
       setView("MATCH");
     } catch (error) {
@@ -322,17 +467,38 @@ export default function Dashboard() {
     }
   };
 
-  // --- 4. PARTIDA ---
+  // --- 4. LÓGICA DA PARTIDA ---
 
-  // Timer (Usando Ref para evitar dependência cíclica)
+  // Timer com Verificação de Fim de Jogo (TIME LIMIT)
   useEffect(() => {
     let interval: ReturnType<typeof setInterval>;
 
-    if (gameState?.isRunning) {
+    if (gameState?.isRunning && !gameOverReason) {
+      // Só roda se não estiver em Game Over
       interval = setInterval(() => {
         setGameState((prev) => {
           if (!prev) return null;
-          if (prev.timer <= 0) return { ...prev, timer: 0, isRunning: false };
+
+          // Lógica de Fim de Tempo
+          if (prev.timer <= 1) {
+            // Chegou a 0
+            const isDraw = prev.scoreRed === prev.scoreBlue;
+            const queueCount = prev.queue.flatMap((t) => t.players).length;
+            const hasFullTeamsOutside = queueCount >= PLAYERS_PER_TEAM * 2;
+
+            // Determina a razão do fim de jogo
+            let reason: GameOverReason = "TIME_LIMIT";
+
+            // Regra Especial: Empate e pouca gente fora -> Pênaltis
+            if (isDraw && !hasFullTeamsOutside) {
+              reason = "PENALTIES";
+            }
+
+            // Ativa o Modal e Pausa
+            setGameOverReason(reason);
+            return { ...prev, timer: 0, isRunning: false };
+          }
+
           return { ...prev, timer: prev.timer - 1 };
         });
       }, 1000);
@@ -340,8 +506,6 @@ export default function Dashboard() {
 
     return () => {
       if (interval) clearInterval(interval);
-
-      // SÓ SALVA SE NÃO ESTIVERMOS ENCERRANDO O RACHA
       if (currentMatchId && gameStateRef.current && !isEndingRef.current) {
         matchService.updateMatchTimer(
           currentMatchId,
@@ -349,64 +513,30 @@ export default function Dashboard() {
         );
       }
     };
-  }, [gameState?.isRunning, currentMatchId]);
+  }, [gameState?.isRunning, currentMatchId, gameOverReason]);
 
-  // Auto-Save a cada 10s
-  useEffect(() => {
-    const autoSave = setInterval(() => {
-      if (gameStateRef.current?.isRunning && currentMatchId) {
-        matchService.updateMatchTimer(
-          currentMatchId,
-          gameStateRef.current.timer
-        );
-      }
-    }, 10000);
-    return () => clearInterval(autoSave);
-  }, [currentMatchId]);
-
-  // Late Join
-  const handleAddLatePlayers = (newIds: string[]) => {
-    if (!gameState) return;
-
-    const updatedSelectedIds = [...selectedIds, ...newIds];
-    setSelectedIds(updatedSelectedIds);
-
-    const newPlayers = newIds
-      .map((id) => allPlayers.find((p) => p.id === id))
-      .filter((p): p is Player => !!p);
-
-    setGameState((prev) => {
-      if (!prev) return null;
-      const currentQueuePlayers = prev.queue.flatMap((t) => t.players);
-      const updatedQueuePlayers = [...currentQueuePlayers, ...newPlayers];
-
-      const newQueueTeams: Team[] = [];
-      for (let i = 0; i < updatedQueuePlayers.length; i += PLAYERS_PER_TEAM) {
-        newQueueTeams.push({
-          name: `Time ${3 + newQueueTeams.length}`,
-          players: updatedQueuePlayers.slice(i, i + PLAYERS_PER_TEAM),
-        });
-      }
-      return { ...prev, queue: newQueueTeams };
-    });
-  };
-
-  // Gol
-  const handleGoalClick = (team: "red" | "blue") => {
-    setGoalTeamColor(team);
-    setGoalModalOpen(true);
-  };
-
+  // Lógica de Gol (Com Limite de 2 Gols)
   const handleConfirmGoal = async (
     scorerId: string,
     assistId: string | null
   ) => {
     if (!gameState || !currentMatchId || !goalTeamColor) return;
 
+    let newScoreRed = gameState.scoreRed;
+    let newScoreBlue = gameState.scoreBlue;
+
+    if (goalTeamColor === "red") newScoreRed++;
+    else newScoreBlue++;
+
+    // Verifica Limite de Gols (2)
+    if (newScoreRed >= 2 || newScoreBlue >= 2) {
+      setGameOverReason("GOAL_LIMIT");
+      setGameState((prev) => (prev ? { ...prev, isRunning: false } : null)); // Pausa o jogo
+    }
+
     setGameState((prev) => {
       if (!prev) return null;
-      const key = goalTeamColor === "red" ? "scoreRed" : "scoreBlue";
-      return { ...prev, [key]: prev[key] + 1 };
+      return { ...prev, scoreRed: newScoreRed, scoreBlue: newScoreBlue };
     });
 
     setMatchStats((prev) => {
@@ -429,26 +559,40 @@ export default function Dashboard() {
 
     try {
       await matchService.registerGoal(currentMatchId, scorerId, assistId);
-      const newScoreRed =
-        goalTeamColor === "red" ? gameState.scoreRed + 1 : gameState.scoreRed;
-      const newScoreBlue =
-        goalTeamColor === "blue"
-          ? gameState.scoreBlue + 1
-          : gameState.scoreBlue;
       await matchService.updateScore(currentMatchId, newScoreRed, newScoreBlue);
     } catch (error) {
       console.error(error);
     }
   };
 
-  // CORREÇÃO: Adicionado _ antes do eventId para indicar que não é usado
+  // ... (Outros handlers mantidos: handleEventDeleted, handleAddLatePlayers) ...
+  const handleAddLatePlayers = (newIds: string[]) => {
+    if (!gameState) return;
+    const updatedSelectedIds = [...selectedIds, ...newIds];
+    setSelectedIds(updatedSelectedIds);
+    const newPlayers = newIds
+      .map((id) => allPlayers.find((p) => p.id === id))
+      .filter((p): p is Player => !!p);
+    setGameState((prev) => {
+      if (!prev) return null;
+      const currentQueuePlayers = prev.queue.flatMap((t) => t.players);
+      const updatedQueuePlayers = [...currentQueuePlayers, ...newPlayers];
+      const newQueueTeams: Team[] = [];
+      for (let i = 0; i < updatedQueuePlayers.length; i += PLAYERS_PER_TEAM) {
+        newQueueTeams.push({
+          name: `Time ${3 + newQueueTeams.length}`,
+          players: updatedQueuePlayers.slice(i, i + PLAYERS_PER_TEAM),
+        });
+      }
+      return { ...prev, queue: newQueueTeams };
+    });
+  };
   const handleEventDeleted = async (
     _eventId: string,
     playerId: string,
     type: "GOAL" | "ASSIST"
   ) => {
     if (!gameState || !currentMatchId) return;
-
     setMatchStats((prev) => {
       const stats = { ...prev };
       if (stats[playerId]) {
@@ -465,23 +609,18 @@ export default function Dashboard() {
       }
       return stats;
     });
-
     if (type === "GOAL") {
       const isRed = gameState.red.players.some((p) => p.id === playerId);
       const isBlue = gameState.blue.players.some((p) => p.id === playerId);
-
       let newScoreRed = gameState.scoreRed;
       let newScoreBlue = gameState.scoreBlue;
-
       if (isRed) newScoreRed--;
       if (isBlue) newScoreBlue--;
-
       setGameState((prev) =>
         prev
           ? { ...prev, scoreRed: newScoreRed, scoreBlue: newScoreBlue }
           : null
       );
-
       try {
         await matchService.updateScore(
           currentMatchId,
@@ -494,69 +633,81 @@ export default function Dashboard() {
     }
   };
 
-  // Finalizar Partida
-  // --- FINALIZAR PARTIDA (COM DUAS OPÇÕES) ---
- // --- FINALIZAR PARTIDA (CORRIGIDA) ---
-  const handleEndMatch = async (action: 'NEXT_MATCH' | 'END_SESSION') => {
+  // --- FINALIZAR PARTIDA (ATUALIZADO) ---
+  // Agora aceita winnerOverride para o caso dos pênaltis
+  const handleEndMatch = async (
+    action: "NEXT_MATCH" | "END_SESSION",
+    winnerOverride?: "RED" | "BLUE" | "DRAW"
+  ) => {
     if (!gameState || !currentMatchId) return;
 
-    const message = action === 'NEXT_MATCH' 
-      ? 'Encerrar jogo e montar próxima partida?' 
-      : 'Tem certeza que deseja FINALIZAR O RACHA? Todas as partidas abertas serão fechadas.';
-
-    if (!confirm(message)) return;
+    // Se veio do modal automático, não pede confirmação de novo
+    if (!gameOverReason) {
+      const message =
+        action === "NEXT_MATCH"
+          ? "Encerrar jogo e montar próxima partida?"
+          : "Tem certeza que deseja FINALIZAR O RACHA?";
+      if (!confirm(message)) return;
+    }
 
     setLoading(true);
 
     try {
-      // --- CAMINHO A: FIM DO RACHA (OPÇÃO NUCLEAR) ---
-      if (action === 'END_SESSION') {
-        isEndingRef.current = true; // Ativa a trava para o useEffect não atrapalhar
-
-        // 1. Salva o estado final deste jogo específico primeiro (para garantir estatísticas)
+      if (action === "END_SESSION") {
+        isEndingRef.current = true;
         await matchService.updateMatchTimer(currentMatchId, gameState.timer);
 
-        // 2. Define vencedor deste jogo
-        const redWins = gameState.scoreRed > gameState.scoreBlue;
-        const isDraw = gameState.scoreRed === gameState.scoreBlue;
-        const winnerColor = isDraw ? 'DRAW' : (redWins ? 'RED' : 'BLUE');
+        // Define vencedor (usando override se tiver, senão calcula)
+        let winnerColor = winnerOverride;
+        if (!winnerColor) {
+          const redWins = gameState.scoreRed > gameState.scoreBlue;
+          const isDraw = gameState.scoreRed === gameState.scoreBlue;
+          winnerColor = isDraw ? "DRAW" : redWins ? "RED" : "BLUE";
+        }
 
         await matchService.finishMatch(currentMatchId, winnerColor);
-
-        // 3. LIMPEZA GERAL: Garante que não sobrou nenhum "zumbi" para trás
         await matchService.finishAllActiveMatches();
-
         setCurrentMatchId(null);
-        alert('Racha finalizado! Bom descanso.');
-        navigate('/');
+        setGameOverReason(null);
+        alert("Racha finalizado! Bom descanso.");
+        navigate("/");
         return;
       }
 
-      // --- CAMINHO B: PRÓXIMA PARTIDA (Segue fluxo normal) ---
+      // NEXT_MATCH
+      await matchService.updateMatchTimer(currentMatchId, gameState.timer);
 
-      // 1. Salva timer
-      matchService.updateMatchTimer(currentMatchId, gameState.timer);
+      let winnerColor = winnerOverride;
+      if (!winnerColor) {
+        const redWins = gameState.scoreRed > gameState.scoreBlue;
+        const isDraw = gameState.scoreRed === gameState.scoreBlue;
+        winnerColor = isDraw ? "DRAW" : redWins ? "RED" : "BLUE";
+      }
 
-      // 2. Define vencedor
-      const redWins = gameState.scoreRed > gameState.scoreBlue;
-      const isDraw = gameState.scoreRed === gameState.scoreBlue;
-      const winnerColor = isDraw ? 'DRAW' : (redWins ? 'RED' : 'BLUE');
-
-      // 3. Fecha só a atual
       await matchService.finishMatch(currentMatchId, winnerColor);
       setCurrentMatchId(null);
 
-      // 4. Lógica de Reciclagem (Draft)
+      // Lógica de Reciclagem (Quem venceu fica, ou override)
+      const redWins = winnerColor === "RED";
+      const blueWins = winnerColor === "BLUE";
+      const isDraw = winnerColor === "DRAW";
+
       const winnerTeam = redWins || isDraw ? gameState.red : gameState.blue;
       const loserTeam = redWins || isDraw ? gameState.blue : gameState.red;
 
-      const waitingPlayers = gameState.queue.flatMap(t => t.players);
+      // Se AZUL venceu, ele vira o novo Vermelho (Rei da mesa)
+      // Se empatou, Vermelho mantém
+
+      const waitingPlayers = gameState.queue.flatMap((t) => t.players);
       let nextBluePlayers: Player[] = [];
       let newQueuePlayers: Player[] = [];
 
       if (waitingPlayers.length >= PLAYERS_PER_TEAM) {
         nextBluePlayers = waitingPlayers.slice(0, PLAYERS_PER_TEAM);
-        newQueuePlayers = [...waitingPlayers.slice(PLAYERS_PER_TEAM), ...loserTeam.players];
+        newQueuePlayers = [
+          ...waitingPlayers.slice(PLAYERS_PER_TEAM),
+          ...loserTeam.players,
+        ];
       } else {
         const needed = PLAYERS_PER_TEAM - waitingPlayers.length;
         const sortedLosers = [...loserTeam.players].sort((a, b) => {
@@ -566,30 +717,33 @@ export default function Dashboard() {
           if (indexB === -1) return -1;
           return indexA - indexB;
         });
-
         const recycledPlayers = sortedLosers.slice(0, needed);
         const losersToQueue = sortedLosers.slice(needed);
-
         nextBluePlayers = [...waitingPlayers, ...recycledPlayers];
         newQueuePlayers = losersToQueue;
       }
 
       setDraftState({
-        red: winnerTeam.players,
+        red: blueWins ? gameState.blue.players : winnerTeam.players, // Se azul ganhou, ele assume como Red
         blue: nextBluePlayers,
-        queue: newQueuePlayers
+        queue: newQueuePlayers,
       });
 
       setMatchStats({});
-      setView('DRAFT');
-
+      setGameOverReason(null);
+      setView("DRAFT");
     } catch (error) {
       console.error(error);
-      alert('Erro ao finalizar.');
-      isEndingRef.current = false; // Reseta trava em caso de erro
+      alert("Erro ao finalizar.");
+      isEndingRef.current = false;
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleGoalClick = (team: "red" | "blue") => {
+    setGoalTeamColor(team);
+    setGoalModalOpen(true);
   };
 
   if (loading)
@@ -601,8 +755,7 @@ export default function Dashboard() {
       </Layout>
     );
 
-  // --- VIEWS ---
-
+  // ... (Views LOBBY e DRAFT mantidas iguais - omitidas) ...
   if (view === "LOBBY") {
     return (
       <Layout title="Check-in do Racha">
@@ -656,85 +809,53 @@ export default function Dashboard() {
     );
   }
 
-  if (view === "DRAFT" && draftState) {
+  if (view === 'DRAFT' && draftState) {
     return (
-      <Layout
-        title="Ajuste os Times"
+      <Layout 
+        title="Ajuste os Times" 
         action={
-          <button
-            onClick={() => setView("LOBBY")}
-            className="text-red-500 text-sm"
-          >
-            Voltar
-          </button>
+            <div className="flex gap-2">
+                <button onClick={handleShareTeams} className="bg-green-100 text-green-700 px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1 hover:bg-green-200">
+                    <Share2 size={14}/> Zap
+                </button>
+                <button onClick={() => setView('LOBBY')} className="text-red-500 text-xs font-bold border border-red-200 px-3 py-1 rounded-lg hover:bg-red-50">
+                    Voltar
+                </button>
+            </div>
         }
       >
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <DraftColumn
-            title="Time Vermelho"
-            color="red"
-            players={draftState.red}
-            onMove={(pid) => movePlayer(pid, "red", "blue")}
-            onKick={(pid) => movePlayer(pid, "red", "queue")}
-          />
-          <DraftColumn
-            title="Time Azul"
-            color="blue"
-            players={draftState.blue}
-            onMove={(pid) => movePlayer(pid, "blue", "red")}
-            onKick={(pid) => movePlayer(pid, "blue", "queue")}
-          />
-
+          <DraftColumn title="Time Vermelho" color="red" players={draftState.red} onMove={(pid) => movePlayer(pid, 'red', 'blue')} onKick={(pid) => movePlayer(pid, 'red', 'queue')} />
+          <DraftColumn title="Time Azul" color="blue" players={draftState.blue} onMove={(pid) => movePlayer(pid, 'blue', 'red')} onKick={(pid) => movePlayer(pid, 'blue', 'queue')} />
+          
           <div className="bg-slate-100 p-4 rounded-xl border border-slate-200">
             <h3 className="font-bold text-slate-600 mb-3">Banco / Fila</h3>
             <div className="space-y-2">
-              {draftState.queue.map((p) => {
+              {draftState.queue.map(p => {
                 const arrivalIndex = selectedIds.indexOf(p.id);
                 return (
-                  <div
-                    key={p.id}
-                    className="bg-white p-2 rounded border flex justify-between items-center"
-                  >
+                    <div key={p.id} className="bg-white p-2 rounded border flex justify-between items-center">
                     <div className="flex items-center gap-2">
-                      {arrivalIndex !== -1 && (
-                        <span className="bg-slate-200 text-slate-600 text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-6 text-center">
-                          {arrivalIndex + 1}º
-                        </span>
-                      )}
-                      <span className="text-sm font-medium text-slate-700">
-                        {p.name}
-                      </span>
+                        {arrivalIndex !== -1 && <span className="bg-slate-200 text-slate-600 text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-6 text-center">{arrivalIndex + 1}º</span>}
+                        <span className="text-sm font-medium text-slate-700">{p.name}</span>
                     </div>
                     <div className="flex gap-1">
-                      <button
-                        onClick={() => movePlayer(p.id, "queue", "red")}
-                        className="text-xs bg-red-100 text-red-600 px-2 py-1 rounded hover:bg-red-200 font-bold"
-                      >
-                        V
-                      </button>
-                      <button
-                        onClick={() => movePlayer(p.id, "queue", "blue")}
-                        className="text-xs bg-blue-100 text-blue-600 px-2 py-1 rounded hover:bg-blue-200 font-bold"
-                      >
-                        A
-                      </button>
+                        <button onClick={() => movePlayer(p.id, 'queue', 'red')} className="text-xs bg-red-100 text-red-600 px-2 py-1 rounded hover:bg-red-200 font-bold">V</button>
+                        <button onClick={() => movePlayer(p.id, 'queue', 'blue')} className="text-xs bg-blue-100 text-blue-600 px-2 py-1 rounded hover:bg-blue-200 font-bold">A</button>
+                        {/* NOVO BOTÃO: Remover do Racha */}
+                        <button onClick={() => handleRemoveFromQueue(p.id)} title="Foi embora (Remover do Racha)" className="text-xs bg-slate-200 text-slate-500 px-2 py-1 rounded hover:bg-slate-300">
+                            <LogOut size={12}/>
+                        </button>
                     </div>
-                  </div>
+                    </div>
                 );
               })}
-              {draftState.queue.length === 0 && (
-                <p className="text-xs text-slate-400">Ninguém no banco.</p>
-              )}
+              {draftState.queue.length === 0 && <p className="text-xs text-slate-400">Ninguém no banco.</p>}
             </div>
           </div>
         </div>
         <div className="mt-6 flex justify-center">
-          <button
-            onClick={confirmMatchStart}
-            className="bg-green-600 text-white px-8 py-3 rounded-xl font-bold text-lg shadow-lg active:scale-95 flex items-center gap-2"
-          >
-            <CheckCircle2 /> Confirmar e Jogar
-          </button>
+            <button onClick={confirmMatchStart} className="bg-green-600 text-white px-8 py-3 rounded-xl font-bold text-lg shadow-lg active:scale-95 flex items-center gap-2"><CheckCircle2 /> Confirmar e Jogar</button>
         </div>
       </Layout>
     );
@@ -772,6 +893,15 @@ export default function Dashboard() {
         onClose={() => setHistoryModalOpen(false)}
         matchId={currentMatchId}
         onEventDeleted={handleEventDeleted}
+      />
+
+      {/* MODAL DE GAME OVER / PÊNALTIS */}
+      <GameOverModal
+        isOpen={!!gameOverReason}
+        reason={gameOverReason}
+        scoreRed={gameState?.scoreRed || 0}
+        scoreBlue={gameState?.scoreBlue || 0}
+        onConfirm={(winner) => handleEndMatch("NEXT_MATCH", winner)}
       />
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -839,16 +969,14 @@ export default function Dashboard() {
               </button>
             </div>
           </div>
+
           <div className="space-y-3 w-full">
-            {/* Opção 1: Segue o jogo */}
             <button
               onClick={() => handleEndMatch("NEXT_MATCH")}
               className="w-full py-4 bg-slate-800 hover:bg-slate-700 text-white rounded-xl font-bold shadow-lg transition-all active:scale-95"
             >
               Encerrar & Próxima Partida
             </button>
-
-            {/* Opção 2: Acaba o dia */}
             <button
               onClick={() => handleEndMatch("END_SESSION")}
               className="w-full py-2 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 rounded-lg text-xs font-bold uppercase tracking-wider transition-colors"
@@ -915,8 +1043,7 @@ export default function Dashboard() {
   );
 }
 
-// --- SUBCOMPONENTES AUXILIARES ---
-
+// ... (Subcomponentes DraftColumn e ActiveTeamCard mantidos) ...
 const DraftColumn = ({
   title,
   color,
