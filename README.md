@@ -1,7 +1,4 @@
-````markdown
 # ⚽ Gerenciador de Racha (Soccer Squad Manager)
-
-<div align="center">
 
 ![React](https://img.shields.io/badge/React-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)
 ![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?style=for-the-badge&logo=typescript&logoColor=white)
@@ -9,8 +6,6 @@
 ![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-38B2AC?style=for-the-badge&logo=tailwind-css&logoColor=white)
 ![Supabase](https://img.shields.io/badge/Supabase-181818?style=for-the-badge&logo=supabase&logoColor=3ECF8E)
 ![Vercel](https://img.shields.io/badge/Vercel-000000?style=for-the-badge&logo=vercel&logoColor=white)
-
-</div>
 
 > Um sistema completo para gestão de partidas de futebol amador, focado em equilíbrio de times, cronometragem precisa e estatísticas detalhadas.
 
@@ -86,7 +81,6 @@ Separei a lógica de negócios da interface.
 ```bash
 git clone [https://github.com/SEU-USUARIO/NOME-DO-REPO.git](https://github.com/SEU-USUARIO/NOME-DO-REPO.git)
 ```
-````
 
 2. Instale as dependências:
 
@@ -123,11 +117,3 @@ npm run dev
 
 Desenvolvido com ⚽ e 💻 por **Gabriel Nunes**.
 [https://www.linkedin.com/in/gabrielnunes-dev/]
-
-```
-
-```
-
-```
-
-```
