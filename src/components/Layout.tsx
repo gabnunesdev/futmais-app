@@ -1,5 +1,5 @@
 import {
-  ArrowLeft, // Importamos a seta
+  ArrowLeft,
   Home as HomeIcon,
   Menu,
   PlayCircle,
@@ -36,7 +36,7 @@ export default function Layout({ children, title, action }: LayoutProps) {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 font-sans text-slate-900">
+    <div className="min-h-screen bg-slate-50 font-sans text-slate-900 pb-10">
       {/* --- HEADER GLOBAL (FIXO) --- */}
       <header className="bg-white border-b border-slate-200 sticky top-0 z-50 px-4 h-16 flex items-center justify-between shadow-sm">
         <div className="flex items-center gap-3">
@@ -138,6 +138,24 @@ export default function Layout({ children, title, action }: LayoutProps) {
           {children}
         </div>
       </main>
+
+      {/* --- RODAPÉ COM CRÉDITOS (ADICIONADO) --- */}
+      <footer className="mt-8 py-6 text-center border-t border-slate-200 mx-auto max-w-5xl px-4">
+        <p className="text-xs text-slate-400 flex items-center justify-center gap-1">
+          Desenvolvido por
+          <a
+            href="https://www.linkedin.com/in/gabrielnunes-dev/" // <--- Mude seu link aqui
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-bold text-blue-600 hover:text-blue-800 hover:underline flex items-center gap-1 transition-colors"
+          >
+            Gabriel Nunes {/* <--- Mude seu nome aqui */}
+          </a>
+        </p>
+        <p className="text-[10px] text-slate-300 mt-1">
+          v1.0.0 • {new Date().getFullYear()}
+        </p>
+      </footer>
     </div>
   );
 }
