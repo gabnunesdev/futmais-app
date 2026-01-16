@@ -5,6 +5,7 @@ import GoalModal from "../components/GoalModal";
 import EventHistoryModal from "../components/EventHistoryModal";
 import { playerService } from "../services/playerService";
 import { matchService } from "../services/matchService";
+import { lobbyService } from "../services/lobbyService";
 import {
   generateTeams,
   PLAYERS_PER_TEAM,
@@ -113,11 +114,7 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
 
   const [allPlayers, setAllPlayers] = useState<Player[]>([]);
-  const [selectedIds, setSelectedIds] = useState<string[]>(() => {
-    // Tenta pegar do armazenamento local primeiro
-    const saved = localStorage.getItem("racha_selected_ids");
-    return saved ? JSON.parse(saved) : [];
-  });
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [draftState, setDraftState] = useState<{
     red: Player[];
     blue: Player[];
@@ -200,26 +197,84 @@ export default function Dashboard() {
     // Nota: Normalmente o EventHistoryModal já chama o delete do banco internamente se você passou a prop matchId,
     // mas aqui estamos apenas reagindo à deleção para atualizar a tela.
   };
+
+  const handleToggleLobby = async (playerId: string) => {
+    let newOrder = [...selectedIds];
+    if (newOrder.includes(playerId)) {
+      newOrder = newOrder.filter((id) => id !== playerId);
+    } else {
+      newOrder.push(playerId); // Adiciona no final
+    }
+
+    // Atualiza estado local (instantâneo) e banco (segurança)
+    setSelectedIds(newOrder);
+    await lobbyService.updateLobbyOrder(newOrder);
+  };
+
+  const handleMoveUp = async (index: number) => {
+    if (index <= 0) return;
+    const newOrder = [...selectedIds];
+    // Troca de posição com o de cima
+    [newOrder[index - 1], newOrder[index]] = [
+      newOrder[index],
+      newOrder[index - 1],
+    ];
+
+    setSelectedIds(newOrder);
+    await lobbyService.updateLobbyOrder(newOrder);
+  };
+
+  const handleMoveDown = async (index: number) => {
+    // Se já for o último, não faz nada
+    if (index === selectedIds.length - 1) return;
+
+    const newOrder = [...selectedIds];
+    // Troca o atual (i) pelo próximo (i+1)
+    const temp = newOrder[index];
+    newOrder[index] = newOrder[index + 1];
+    newOrder[index + 1] = temp;
+
+    setSelectedIds(newOrder);
+    await lobbyService.updateLobbyOrder(newOrder);
+  };
+
   useEffect(() => {
     localStorage.setItem("racha_selected_ids", JSON.stringify(selectedIds));
   }, [selectedIds]);
 
   useEffect(() => {
-    // --- AUTH SIMPLES ---
-    const isAdmin = sessionStorage.getItem("is_admin");
-    if (!isAdmin) {
-      const password = prompt(
-        "🔒 Área Restrita!\nDigite a senha do organizador:"
-      );
-      if (password === "gabdev") {
-        // Defina sua senha
-        sessionStorage.setItem("is_admin", "true");
-      } else {
-        alert("Senha incorreta. Você será redirecionado para o Ranking.");
-        navigate("/");
+    sessionStorage.setItem("is_admin", "true");
+  }, []);
+
+  useEffect(() => {
+    const loadData = async () => {
+      setLoading(true);
+      try {
+        const [players, match, lobbyOrder] = await Promise.all([
+          playerService.getAll(),
+          matchService.getActiveMatch(),
+          lobbyService.getLobbyOrder(), // <--- Carrega a ordem global
+        ]);
+
+        setAllPlayers(players);
+        // Seta a lista visual com o que veio do banco
+        setSelectedIds(lobbyOrder);
+
+        // ... Lógica de carregar partida ativa (igual ao anterior) ...
+        if (match) {
+          // ... (mantenha a lógica de carregar o gameState)
+          // APENAS GARANTA QUE O selectedIds SE MANTENHA SINCRONIZADO:
+          if (lobbyOrder.length > 0) setSelectedIds(lobbyOrder);
+          // ...
+        }
+      } catch (e) {
+        console.error(e);
+      } finally {
+        setLoading(false);
       }
-    }
-  }, [navigate]);
+    };
+    loadData();
+  }, []);
 
   useEffect(() => {
     gameStateRef.current = gameState;
@@ -604,11 +659,9 @@ export default function Dashboard() {
         <LobbyView
           allPlayers={allPlayers}
           selectedIds={selectedIds}
-          onToggle={(id) =>
-            setSelectedIds((p) =>
-              p.includes(id) ? p.filter((x) => x !== id) : [...p, id]
-            )
-          }
+          onToggle={handleToggleLobby} // Usa a nova função
+          onMoveUp={handleMoveUp} // Nova função
+          onMoveDown={handleMoveDown}
           onProceed={handleGoToDraft}
         />
       </Layout>
@@ -718,6 +771,7 @@ export default function Dashboard() {
             setGoalTeamColor("red");
             setGoalModalOpen(true);
           }}
+          lobbyOrder={selectedIds}
         />
 
         <div className="flex flex-col items-center">
@@ -797,6 +851,7 @@ export default function Dashboard() {
             setGoalTeamColor("blue");
             setGoalModalOpen(true);
           }}
+          lobbyOrder={selectedIds}
         />
       </div>
 

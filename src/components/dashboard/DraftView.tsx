@@ -1,17 +1,17 @@
-import { type Player } from '../../types';
+import {type Player } from '../../types';
 import { ArrowRightLeft, CheckCircle2, Share2, LogOut } from 'lucide-react';
 import { PLAYERS_PER_TEAM } from '../../domain/matchmaking/balancer';
 
-// 1. Tipagem das Props da Coluna (DraftColumn)
+// 1. Adicionei lobbyOrder nas props da Coluna
 interface DraftColumnProps {
   title: string;
   color: 'red' | 'blue';
   players: Player[];
+  lobbyOrder: string[]; // <--- Nova prop para calcular a ordem
   onMove: (playerId: string) => void;
   onKick: (playerId: string) => void;
 }
 
-// 2. Tipagem das Props da View Principal (DraftView)
 interface DraftViewProps {
   draftState: { red: Player[], blue: Player[], queue: Player[] };
   selectedIds: string[];
@@ -22,22 +22,56 @@ interface DraftViewProps {
   onShare: () => void;
 }
 
-// Subcomponente tipado corretamente
-const DraftColumn = ({ title, color, players, onMove, onKick }: DraftColumnProps) => (
-  <div className={`p-4 rounded-xl border-t-4 bg-white shadow-sm ${color === 'red' ? 'border-red-500' : 'border-blue-500'}`}>
-    <h3 className={`font-bold uppercase text-sm mb-3 ${color === 'red' ? 'text-red-600' : 'text-blue-600'}`}>{title} ({players.length})</h3>
+// 2. Componente da Coluna Atualizado com Visual de Dados
+const DraftColumn = ({ title, color, players, lobbyOrder, onMove, onKick }: DraftColumnProps) => (
+  <div className={`p-3 rounded-xl border-t-4 bg-white shadow-sm ${color === 'red' ? 'border-red-500' : 'border-blue-500'}`}>
+    <h3 className={`font-bold uppercase text-xs mb-3 flex justify-between ${color === 'red' ? 'text-red-600' : 'text-blue-600'}`}>
+        <span>{title}</span>
+        <span>{players.length}</span>
+    </h3>
+    
     <div className="space-y-2">
-      {players.map((p: Player) => (
-        <div key={p.id} className="flex justify-between items-center text-sm p-2 bg-slate-50 rounded border border-slate-100">
-           <span>{p.name}</span>
-           <div className="flex gap-1">
-             <button onClick={() => onMove(p.id)} title="Trocar" className="p-1 hover:bg-slate-200 rounded"><ArrowRightLeft size={14}/></button>
-             <button onClick={() => onKick(p.id)} title="Banco" className="p-1 hover:bg-red-100 text-red-500 rounded">X</button>
-           </div>
-        </div>
-      ))}
+      {players.map((p: Player) => {
+        // Calcula a ordem de chegada
+        const arrivalIndex = lobbyOrder.indexOf(p.id);
+        const arrivalText = arrivalIndex !== -1 ? `${arrivalIndex + 1}º` : '-';
+
+        return (
+            <div key={p.id} className="flex justify-between items-center p-2 bg-slate-50 rounded border border-slate-100 group hover:border-blue-200 transition-colors">
+            
+            {/* LADO ESQUERDO: INFOS */}
+            <div className="flex items-center gap-2 overflow-hidden">
+                {/* Badge de Chegada */}
+                <div className="min-w-6 h-6 flex items-center justify-center bg-white border border-slate-200 rounded text-[10px] font-bold text-slate-500 shadow-sm" title={`Chegou em ${arrivalText}`}>
+                    {arrivalText}
+                </div>
+                
+                <div className="flex flex-col truncate">
+                    <span className="text-sm font-bold text-slate-700 leading-tight truncate">{p.name}</span>
+                    <span className="text-[10px] text-yellow-500 font-medium">
+                        {'⭐'.repeat(p.stars)}
+                    </span>
+                </div>
+            </div>
+
+            {/* LADO DIREITO: AÇÕES */}
+            <div className="flex gap-1 shrink-0">
+                <button onClick={() => onMove(p.id)} title="Trocar de Time" className="p-1.5 bg-white border border-slate-200 text-slate-500 hover:text-blue-600 hover:border-blue-300 rounded-lg transition-colors">
+                    <ArrowRightLeft size={14}/>
+                </button>
+                <button onClick={() => onKick(p.id)} title="Mandar para o Banco" className="p-1.5 bg-white border border-slate-200 text-slate-400 hover:text-red-500 hover:border-red-300 rounded-lg transition-colors">
+                    <span className="font-bold text-xs px-1">X</span>
+                </button>
+            </div>
+            </div>
+        );
+      })}
+      
+      {/* Slots Vazios */}
       {[...Array(Math.max(0, PLAYERS_PER_TEAM - players.length))].map((_, i) => (
-        <div key={i} className="h-9 border-2 border-dashed border-slate-100 rounded flex items-center justify-center text-xs text-slate-300">Vaga aberta</div>
+        <div key={i} className="h-10 border-2 border-dashed border-slate-100 rounded flex items-center justify-center text-[10px] text-slate-300 uppercase tracking-widest">
+            Vaga aberta
+        </div>
       ))}
     </div>
   </div>
@@ -55,46 +89,60 @@ export default function DraftView({ draftState, selectedIds, onMove, onRemoveFro
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {/* Passamos o selectedIds como lobbyOrder */}
         <DraftColumn 
             title="Time Vermelho" 
             color="red" 
             players={draftState.red} 
+            lobbyOrder={selectedIds} 
             onMove={(pid) => onMove(pid, 'red', 'blue')} 
             onKick={(pid) => onMove(pid, 'red', 'queue')} 
         />
+        
         <DraftColumn 
             title="Time Azul" 
             color="blue" 
             players={draftState.blue} 
+            lobbyOrder={selectedIds}
             onMove={(pid) => onMove(pid, 'blue', 'red')} 
             onKick={(pid) => onMove(pid, 'blue', 'queue')} 
         />
         
-        <div className="bg-slate-100 p-4 rounded-xl border border-slate-200">
-          <h3 className="font-bold text-slate-600 mb-3">Banco / Fila</h3>
+        {/* COLUNA DO BANCO / FILA */}
+        <div className="bg-slate-100 p-3 rounded-xl border border-slate-200">
+          <h3 className="font-bold text-slate-600 text-xs uppercase mb-3">Banco / Próximos</h3>
           <div className="space-y-2">
             {draftState.queue.map(p => {
               const arrivalIndex = selectedIds.indexOf(p.id);
+              const arrivalText = arrivalIndex !== -1 ? `${arrivalIndex + 1}º` : '-';
+              
               return (
                   <div key={p.id} className="bg-white p-2 rounded border flex justify-between items-center">
-                  <div className="flex items-center gap-2">
-                      {arrivalIndex !== -1 && <span className="bg-slate-200 text-slate-600 text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-6 text-center">{arrivalIndex + 1}º</span>}
-                      <span className="text-sm font-medium text-slate-700">{p.name}</span>
-                  </div>
-                  <div className="flex gap-1">
-                      <button onClick={() => onMove(p.id, 'queue', 'red')} className="text-xs bg-red-100 text-red-600 px-2 py-1 rounded hover:bg-red-200 font-bold">V</button>
-                      <button onClick={() => onMove(p.id, 'queue', 'blue')} className="text-xs bg-blue-100 text-blue-600 px-2 py-1 rounded hover:bg-blue-200 font-bold">A</button>
-                      <button onClick={() => onRemoveFromQueue(p.id)} title="Foi embora" className="text-xs bg-slate-200 text-slate-500 px-2 py-1 rounded hover:bg-slate-300"><LogOut size={12}/></button>
-                  </div>
+                    <div className="flex items-center gap-2 overflow-hidden">
+                        <span className="bg-slate-200 text-slate-600 text-[10px] font-bold px-1.5 py-0.5 rounded min-w-6 text-center" title="Ordem de chegada">
+                            {arrivalText}
+                        </span>
+                        <div className="flex flex-col truncate">
+                            <span className="text-sm font-medium text-slate-700 truncate">{p.name}</span>
+                            <span className="text-[10px] text-yellow-500 leading-none">{'⭐'.repeat(p.stars)}</span>
+                        </div>
+                    </div>
+                    
+                    <div className="flex gap-1 shrink-0">
+                        <button onClick={() => onMove(p.id, 'queue', 'red')} className="text-[10px] bg-red-100 text-red-600 px-2 py-1 rounded hover:bg-red-200 font-bold border border-red-200">VER</button>
+                        <button onClick={() => onMove(p.id, 'queue', 'blue')} className="text-[10px] bg-blue-100 text-blue-600 px-2 py-1 rounded hover:bg-blue-200 font-bold border border-blue-200">AZU</button>
+                        <button onClick={() => onRemoveFromQueue(p.id)} title="Foi embora" className="text-xs bg-slate-100 text-slate-400 px-2 py-1 rounded hover:bg-slate-200 border border-slate-200"><LogOut size={12}/></button>
+                    </div>
                   </div>
               );
             })}
-            {draftState.queue.length === 0 && <p className="text-xs text-slate-400">Ninguém no banco.</p>}
+            {draftState.queue.length === 0 && <p className="text-xs text-slate-400 text-center py-4">Ninguém no banco.</p>}
           </div>
         </div>
       </div>
-      <div className="mt-6 flex justify-center">
-          <button onClick={onConfirm} className="bg-green-600 text-white px-8 py-3 rounded-xl font-bold text-lg shadow-lg active:scale-95 flex items-center gap-2"><CheckCircle2 /> Confirmar e Jogar</button>
+      
+      <div className="mt-6 flex justify-center pb-8">
+          <button onClick={onConfirm} className="bg-green-600 text-white px-8 py-3 rounded-xl font-bold text-lg shadow-lg active:scale-95 flex items-center gap-2 hover:bg-green-700 transition-colors"><CheckCircle2 /> Confirmar e Jogar</button>
       </div>
     </>
   );
