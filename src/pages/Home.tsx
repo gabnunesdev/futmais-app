@@ -40,7 +40,7 @@ export default function Home() {
   };
 
   return (
-    <Layout title="Soccer Manager ⚽">
+    <Layout title="Gerenciador de Peladas ⚽">
       
       {/* --- CABEÇALHO DO USUÁRIO --- */}
       {!loading && userName ? (

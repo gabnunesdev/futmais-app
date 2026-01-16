@@ -13,6 +13,7 @@ import {
 import { type Player, type MatchState, type Team } from "../types";
 import {
   Play,
+  Pause,
   Timer,
   RotateCcw,
   Loader2,
@@ -734,21 +735,28 @@ export default function Dashboard() {
                 .padStart(2, "0")}
               :{(gameState!.timer % 60).toString().padStart(2, "0")}
             </div>
-            <div className="flex justify-center gap-4 mt-4">
+            <div className="flex justify-center gap-4 mt-6">
               <button
                 onClick={() =>
-                  setGameState((p) => {
-                    if (!p) return null;
-                    const run = !p.isRunning;
-                    if (!run && currentMatchId)
-                      matchService.updateMatchTimer(currentMatchId, p.timer);
-                    return { ...p, isRunning: run };
-                  })
+                  setGameState((curr) =>
+                    curr ? { ...curr, isRunning: !curr.isRunning } : null
+                  )
                 }
-                className={`p-3 rounded-full ${gameState?.isRunning ? "bg-yellow-500 text-black" : "bg-green-600 text-white"}`}
+                // Adicionamos o '?' antes do .isRunning em todos os lugares
+                className={`p-5 rounded-full transition-all active:scale-95 flex items-center justify-center ${
+                  gameState?.isRunning
+                    ? "bg-yellow-400 hover:bg-yellow-500 text-yellow-900 shadow-yellow-200"
+                    : "bg-green-600 hover:bg-green-700 text-white shadow-green-200"
+                }`}
+                title={gameState?.isRunning ? "Pausar Tempo" : "Iniciar Tempo"}
               >
-                <Play size={24} />
+                {gameState?.isRunning ? (
+                  <Pause size={40} fill="currentColor" />
+                ) : (
+                  <Play size={40} fill="currentColor" className="ml-1" />
+                )}
               </button>
+
               <button
                 onClick={() =>
                   setGameState((p) =>
@@ -759,7 +767,8 @@ export default function Dashboard() {
               >
                 <RotateCcw size={24} />
               </button>
-              <button
+
+              {/* <button
                 onClick={() =>
                   setGameState((p) =>
                     p ? { ...p, timer: 5, isRunning: true } : null
@@ -769,7 +778,7 @@ export default function Dashboard() {
                 title="Pular para o final"
               >
                 5s
-              </button>
+              </button> */}
             </div>
             <div className="mt-6 pt-4 border-t border-slate-700 flex justify-center">
               <button
