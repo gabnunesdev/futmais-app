@@ -19,7 +19,7 @@ export default function EventHistoryModal({
       if (!matchId) return;
       setLoading(true);
       try {
-        const data = await matchService.getMatchEventsWithNames(matchId);
+        const data = await matchService.getMatchEvents(matchId);
         setEvents((data as unknown as MatchEventWithPlayer[]) || []);
       } catch (error) {
         console.error(error);
