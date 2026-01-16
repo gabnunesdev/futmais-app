@@ -2,19 +2,32 @@ import { supabase } from "./supabase";
 
 export const matchService = {
   // 1. Cria a partida (status: IN_PROGRESS)
-  startMatch: async (redIds: string[], blueIds: string[]) => {
+  startMatch: async (
+    redIds: string[],
+    blueIds: string[],
+    queueIds: string[]
+  ) => {
+    // Busca duração padrão
+    const { data: config } = await supabase
+      .from("configs")
+      .select("default_match_duration")
+      .single();
+
+    const duration = config?.default_match_duration || 600;
+
     const { data, error } = await supabase
       .from("matches")
-      .insert([
-        {
-          team_red_ids: redIds,
-          team_blue_ids: blueIds,
-          score_red: 0,
-          score_blue: 0,
-          status: "IN_PROGRESS",
-          duration_seconds: 600,
-        },
-      ])
+      .insert({
+        team_red_ids: redIds,
+        team_blue_ids: blueIds,
+        queue_ids: queueIds, // <--- NOVO: Salva a fila
+        status: "IN_PROGRESS",
+        score_red: 0,
+        score_blue: 0,
+        started_at: new Date().toISOString(),
+        last_active_at: new Date().toISOString(),
+        duration_seconds: duration,
+      })
       .select()
       .single();
 
@@ -26,17 +39,21 @@ export const matchService = {
   getActiveMatch: async () => {
     const { data, error } = await supabase
       .from("matches")
-      .select("*")
+      .select("*") // O Select * já vai trazer o queue_ids
       .eq("status", "IN_PROGRESS")
-      .order("created_at", { ascending: false }) // ORDENA: Pega a mais recente primeiro
-      .limit(1) // LIMITA: Pega só 1 (ignora as outras 13 travadas)
-      .maybeSingle(); // Retorna o objeto ou null
+      .limit(1)
+      .maybeSingle();
 
-    if (error) {
-      console.error("Erro ao buscar partida ativa:", error);
-      return null;
-    }
+    if (error) throw error;
     return data;
+  },
+
+  updateQueue: async (matchId: string, newQueueIds: string[]) => {
+    const { error } = await supabase
+      .from("matches")
+      .update({ queue_ids: newQueueIds })
+      .eq("id", matchId);
+    if (error) throw error;
   },
 
   // 3. Registra Gol/Assistência

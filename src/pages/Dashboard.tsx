@@ -113,7 +113,11 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
 
   const [allPlayers, setAllPlayers] = useState<Player[]>([]);
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [selectedIds, setSelectedIds] = useState<string[]>(() => {
+    // Tenta pegar do armazenamento local primeiro
+    const saved = localStorage.getItem("racha_selected_ids");
+    return saved ? JSON.parse(saved) : [];
+  });
   const [draftState, setDraftState] = useState<{
     red: Player[];
     blue: Player[];
@@ -196,6 +200,9 @@ export default function Dashboard() {
     // Nota: Normalmente o EventHistoryModal já chama o delete do banco internamente se você passou a prop matchId,
     // mas aqui estamos apenas reagindo à deleção para atualizar a tela.
   };
+  useEffect(() => {
+    localStorage.setItem("racha_selected_ids", JSON.stringify(selectedIds));
+  }, [selectedIds]);
 
   useEffect(() => {
     // --- AUTH SIMPLES ---
@@ -219,78 +226,114 @@ export default function Dashboard() {
   }, [gameState]);
 
   useEffect(() => {
+    const loadInitialData = async () => {
+      try {
+        setLoading(true);
+        const players = await playerService.getAll();
+        setAllPlayers(players);
+        const activeMatch = await matchService.getActiveMatch();
+
+        if (activeMatch) {
+          const getP = (id: string) => players.find((p: Player) => p.id === id);
+
+          // Carrega times
+          const redPlayers = activeMatch.team_red_ids
+            .map(getP)
+            .filter(Boolean) as Player[];
+          const bluePlayers = activeMatch.team_blue_ids
+            .map(getP)
+            .filter(Boolean) as Player[];
+
+          // --- AQUI ESTAVA O BUG DOS "GHOST PLAYERS" ---
+          // Antes: Calculava quem não estava jogando.
+          // Agora: Pega explicitamente quem está salvo na coluna queue_ids
+          let queuePlayers: Player[] = [];
+
+          if (activeMatch.queue_ids && activeMatch.queue_ids.length > 0) {
+            // Se tem fila salva no banco, usa ela (respeita a ordem!)
+            queuePlayers = activeMatch.queue_ids
+              .map(getP)
+              .filter(Boolean) as Player[];
+          } else {
+            // Fallback (caso seja uma partida velha sem queue_ids): faz o calculo antigo
+            const playingIds = [
+              ...activeMatch.team_red_ids,
+              ...activeMatch.team_blue_ids,
+            ];
+            queuePlayers = players.filter(
+              (p: Player) => !playingIds.includes(p.id) && p.is_active
+            );
+          }
+
+          // Atualiza o SelectedIds para refletir o jogo atual + fila (para não perder a seleção visual)
+          const currentInGameOrQueue = [
+            ...activeMatch.team_red_ids,
+            ...activeMatch.team_blue_ids,
+            ...queuePlayers.map((p) => p.id),
+          ];
+          // Nota: Não sobrescrevemos o localStorage aqui para não bagunçar se você estiver editando outra coisa,
+          // mas atualizamos o estado visual se estiver vazio.
+          setSelectedIds((prev) => {
+            if (prev.length === 0) return currentInGameOrQueue;
+            return prev;
+          });
+
+          // ... Carrega stats e timer (igual ao anterior) ...
+          const events = await matchService.getMatchEvents(activeMatch.id);
+          const stats: Record<string, PlayerStats> = {};
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          events?.forEach((ev: any) => {
+            if (!stats[ev.player_id])
+              stats[ev.player_id] = { goals: 0, assists: 0 };
+            if (ev.event_type === "GOAL") stats[ev.player_id].goals++;
+            if (ev.event_type === "ASSIST") stats[ev.player_id].assists++;
+          });
+
+          setMatchStats(stats);
+          setCurrentMatchId(activeMatch.id);
+
+          let calculatedTimer = activeMatch.duration_seconds ?? 600;
+          if (activeMatch.last_active_at) {
+            const secondsPassed = Math.floor(
+              (new Date().getTime() -
+                new Date(activeMatch.last_active_at).getTime()) /
+                1000
+            );
+            if (secondsPassed > 0)
+              calculatedTimer = Math.max(0, calculatedTimer - secondsPassed);
+          }
+
+          // Monta os times da fila visualmente
+          const queueTeams: Team[] = [];
+          for (let i = 0; i < queuePlayers.length; i += PLAYERS_PER_TEAM) {
+            queueTeams.push({
+              name: `Time ${3 + queueTeams.length}`,
+              players: queuePlayers.slice(i, i + PLAYERS_PER_TEAM),
+            });
+          }
+
+          setGameState({
+            red: { name: "Time Vermelho", players: redPlayers },
+            blue: { name: "Time Azul", players: bluePlayers },
+            queue: queueTeams, // Usa a fila correta
+            scoreRed: activeMatch.score_red,
+            scoreBlue: activeMatch.score_blue,
+            timer: calculatedTimer,
+            isRunning: true,
+            period: 1,
+          });
+          setView("MATCH");
+        }
+      } catch (error) {
+        console.error(error);
+        alert("Erro ao carregar dados.");
+      } finally {
+        setLoading(false);
+      }
+    };
+
     loadInitialData();
   }, []);
-
-  const loadInitialData = async () => {
-    try {
-      setLoading(true);
-      const players = await playerService.getAll();
-      setAllPlayers(players);
-      const activeMatch = await matchService.getActiveMatch();
-
-      if (activeMatch) {
-        const getP = (id: string) => players.find((p: Player) => p.id === id);
-        const redPlayers = activeMatch.team_red_ids
-          .map(getP)
-          .filter(Boolean) as Player[];
-        const bluePlayers = activeMatch.team_blue_ids
-          .map(getP)
-          .filter(Boolean) as Player[];
-
-        const playingIds = [
-          ...activeMatch.team_red_ids,
-          ...activeMatch.team_blue_ids,
-        ];
-        const queuePlayers = players.filter(
-          (p: Player) => !playingIds.includes(p.id) && p.is_active
-        );
-
-        setSelectedIds([...playingIds, ...queuePlayers.map((p) => p.id)]);
-
-        const events = await matchService.getMatchEvents(activeMatch.id);
-        const stats: Record<string, PlayerStats> = {};
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        events?.forEach((ev: any) => {
-          if (!stats[ev.player_id])
-            stats[ev.player_id] = { goals: 0, assists: 0 };
-          if (ev.event_type === "GOAL") stats[ev.player_id].goals++;
-          if (ev.event_type === "ASSIST") stats[ev.player_id].assists++;
-        });
-
-        setMatchStats(stats);
-        setCurrentMatchId(activeMatch.id);
-
-        let calculatedTimer = activeMatch.duration_seconds ?? 600;
-        if (activeMatch.last_active_at) {
-          const secondsPassed = Math.floor(
-            (new Date().getTime() -
-              new Date(activeMatch.last_active_at).getTime()) /
-              1000
-          );
-          if (secondsPassed > 0)
-            calculatedTimer = Math.max(0, calculatedTimer - secondsPassed);
-        }
-
-        setGameState({
-          red: { name: "Time Vermelho", players: redPlayers },
-          blue: { name: "Time Azul", players: bluePlayers },
-          queue: [{ name: "Próximos", players: queuePlayers }],
-          scoreRed: activeMatch.score_red,
-          scoreBlue: activeMatch.score_blue,
-          timer: calculatedTimer,
-          isRunning: true,
-          period: 1,
-        });
-        setView("MATCH");
-      }
-    } catch (error) {
-      console.error(error);
-      alert("Erro ao carregar dados.");
-    } finally {
-      setLoading(false);
-    }
-  };
 
   // --- LÓGICA DE NEGÓCIO ---
 
@@ -326,10 +369,15 @@ export default function Dashboard() {
     if (!draftState) return;
     setLoading(true);
     try {
+      // Passa a fila (queue) para o serviço salvar no banco
+      const queueIds = draftState.queue.map((p) => p.id);
+
       const matchData = await matchService.startMatch(
         draftState.red.map((p) => p.id),
-        draftState.blue.map((p) => p.id)
+        draftState.blue.map((p) => p.id),
+        queueIds // <--- Passando a fila
       );
+
       setCurrentMatchId(matchData.id);
 
       const queueTeams: Team[] = [];
@@ -608,23 +656,38 @@ export default function Dashboard() {
         isOpen={latePlayerModalOpen}
         onClose={() => setLatePlayerModalOpen(false)}
         players={playersNotInGame}
-        onAdd={(ids) => {
+        onAdd={async (ids) => {
           if (!gameState) return;
-          setSelectedIds((prev) => [...prev, ...ids]);
+
+          // 1. Atualiza LocalStorage e Seleção
+          const updatedSelection = [...selectedIds, ...ids];
+          setSelectedIds(updatedSelection);
+
           const newPlayers = ids
             .map((id) => allPlayers.find((p) => p.id === id))
             .filter((p): p is Player => !!p);
+
+          // 2. Atualiza Estado Local
           setGameState((prev) => {
             if (!prev) return null;
-            const newQ = [
-              ...prev.queue.flatMap((t) => t.players),
-              ...newPlayers,
-            ];
+            const currentQueueList = prev.queue.flatMap((t) => t.players);
+            const newFullQueue = [...currentQueueList, ...newPlayers];
+
+            // IMPORTANTE: Atualiza no banco se a partida existir
+            if (currentMatchId) {
+              matchService
+                .updateQueue(
+                  currentMatchId,
+                  newFullQueue.map((p) => p.id)
+                )
+                .catch(console.error);
+            }
+
             const newTeams: Team[] = [];
-            for (let i = 0; i < newQ.length; i += PLAYERS_PER_TEAM)
+            for (let i = 0; i < newFullQueue.length; i += PLAYERS_PER_TEAM)
               newTeams.push({
                 name: `Time ${3 + newTeams.length}`,
-                players: newQ.slice(i, i + PLAYERS_PER_TEAM),
+                players: newFullQueue.slice(i, i + PLAYERS_PER_TEAM),
               });
             return { ...prev, queue: newTeams };
           });
