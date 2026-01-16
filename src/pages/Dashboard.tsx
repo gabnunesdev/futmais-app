@@ -136,7 +136,7 @@ export default function Dashboard() {
 
   // --- FUNÇÃO PARA DELETAR EVENTOS (Gols/Assistências) ---
   const handleEventDeleted = async (
-    eventId: string,
+    _eventId: string,
     playerId: string,
     type: "GOAL" | "ASSIST"
   ) => {
