@@ -40,8 +40,13 @@ export const playerService = {
     if (error) throw error;
   },
 
-  getRankingWins: async () => {
-    const { data, error } = await supabase.rpc("get_ranking_wins");
+  getRankingWins: async (startDate?: string, endDate?: string) => {
+    // Passamos os parâmetros para a função RPC do banco
+    const { data, error } = await supabase.rpc("get_ranking_wins", {
+      start_date: startDate || null,
+      end_date: endDate || null,
+    });
+
     if (error) throw error;
     return data as { player_id: string; name: string; wins: number }[];
   },
