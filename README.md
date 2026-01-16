@@ -11,6 +11,9 @@
 
 ---
 
+<img width="1920" height="924" alt="image" src="https://github.com/user-attachments/assets/02ae7f47-532e-4188-8e88-34e352735b7d" />
+
+
 ## 🎯 O Problema
 
 Organizar um futebol semanal ("Racha") é caótico:
