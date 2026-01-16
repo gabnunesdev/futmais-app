@@ -8,9 +8,8 @@ export const playerService = {
       .from("players")
       .select("*")
       .order("name");
-
     if (error) throw error;
-    return data as Player[];
+    return data;
   },
 
   // Cria novo jogador
@@ -25,12 +24,6 @@ export const playerService = {
     return data as Player;
   },
 
-  // Deleta jogador (Soft delete ou Hard delete? Por enquanto Hard delete para simplificar)
-  delete: async (id: string) => {
-    const { error } = await supabase.from("players").delete().eq("id", id);
-    if (error) throw error;
-  },
-
   // Atualiza nota (caso o jogador evolua ou piore no churrasco)
   update: async (id: string, name: string, stars: number) => {
     const { error } = await supabase
@@ -39,5 +32,17 @@ export const playerService = {
       .eq("id", id);
 
     if (error) throw error;
+  },
+
+  // Deleta jogador (Soft delete ou Hard delete? Por enquanto Hard delete para simplificar)
+  delete: async (id: string) => {
+    const { error } = await supabase.from("players").delete().eq("id", id);
+    if (error) throw error;
+  },
+
+  getRankingWins: async () => {
+    const { data, error } = await supabase.rpc("get_ranking_wins");
+    if (error) throw error;
+    return data as { player_id: string; name: string; wins: number }[];
   },
 };
