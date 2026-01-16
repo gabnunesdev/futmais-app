@@ -32,15 +32,12 @@ export const playerService = {
   },
 
   // Atualiza nota (caso o jogador evolua ou piore no churrasco)
-  update: async (id: string, stars: number) => {
-    const { data, error } = await supabase
+  update: async (id: string, name: string, stars: number) => {
+    const { error } = await supabase
       .from("players")
-      .update({ stars })
-      .eq("id", id)
-      .select()
-      .single();
+      .update({ name, stars })
+      .eq("id", id);
 
     if (error) throw error;
-    return data as Player;
   },
 };

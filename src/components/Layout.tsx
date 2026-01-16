@@ -1,7 +1,6 @@
 import {
   ArrowLeft, // Importamos a seta
   Home as HomeIcon,
-  LogOut,
   Menu,
   PlayCircle,
   Trophy,
@@ -9,7 +8,6 @@ import {
 } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { useAuth } from "../hooks/useAuth";
 
 interface LayoutProps {
   children: ReactNode;
@@ -18,7 +16,6 @@ interface LayoutProps {
 }
 
 export default function Layout({ children, title, action }: LayoutProps) {
-  const { signOut } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -53,7 +50,7 @@ export default function Layout({ children, title, action }: LayoutProps) {
 
           <h1
             onClick={() => navigate("/")}
-            className="text-xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent cursor-pointer"
+            className="text-xl font-bold bg-linear-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent cursor-pointer"
           >
             FutMais
           </h1>
@@ -79,14 +76,6 @@ export default function Layout({ children, title, action }: LayoutProps) {
             );
           })}
         </nav>
-
-        <button
-          onClick={() => signOut()}
-          className="p-2 text-slate-400 hover:text-red-600 transition-colors"
-          title="Sair"
-        >
-          <LogOut size={20} />
-        </button>
       </header>
 
       {/* --- MENU MOBILE (DRAWER) --- */}
