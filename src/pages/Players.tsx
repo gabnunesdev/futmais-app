@@ -1,8 +1,8 @@
+import { Plus, Star, Trash2, User } from "lucide-react";
 import { useEffect, useState } from "react";
 import Layout from "../components/Layout";
 import { playerService } from "../services/playerService";
-import { type Player } from "../types";
-import { Star, Trash2, User, Plus } from "lucide-react";
+import type { Player } from "../types";
 
 export default function Players() {
   const [players, setPlayers] = useState<Player[]>([]);

@@ -1,13 +1,13 @@
 import React from "react";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { AuthProvider } from "./context/AuthContext";
 import { useAuth } from "./hooks/useAuth";
-import Login from "./pages/Login";
-import Home from "./pages/Home"; // Nova Importação
 import Dashboard from "./pages/Dashboard"; // O antigo Dashboard (agora será /match)
+import History from "./pages/History"; // <--- Import
+import Home from "./pages/Home"; // Nova Importação
+import Login from "./pages/Login";
 import Players from "./pages/Players";
 import Ranking from "./pages/Ranking"; // <--- Import
-import History from "./pages/History"; // <--- Import
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   const { session, loading } = useAuth();

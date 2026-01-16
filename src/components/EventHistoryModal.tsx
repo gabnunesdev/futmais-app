@@ -1,28 +1,7 @@
+import { History, Loader2, Trash2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { matchService } from "../services/matchService";
-import { X, Trash2, History, Loader2 } from "lucide-react";
-
-interface EventHistoryModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  matchId: string | null;
-  onEventDeleted: (
-    eventId: string,
-    playerId: string,
-    type: "GOAL" | "ASSIST"
-  ) => void;
-}
-
-// Interface tipada para segurança
-interface MatchEventWithPlayer {
-  id: string;
-  player_id: string;
-  event_type: "GOAL" | "ASSIST";
-  created_at: string;
-  players?: {
-    name: string;
-  };
-}
+import type { EventHistoryModalProps, MatchEventWithPlayer } from "../types";
 
 export default function EventHistoryModal({
   isOpen,

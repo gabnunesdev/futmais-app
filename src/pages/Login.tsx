@@ -1,33 +1,33 @@
-import { useState } from 'react';
-import { useAuth } from '../hooks/useAuth';
-import { useNavigate } from 'react-router-dom';
-import { Lock, Mail, Loader2, Trophy } from 'lucide-react';
+import { Loader2, Lock, Mail, Trophy } from "lucide-react";
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { useAuth } from "../hooks/useAuth";
 
 export default function Login() {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
-  
+
   const { signIn } = useAuth();
   const navigate = useNavigate();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
-    setError('');
+    setError("");
 
     const result = await signIn(email, password);
 
     if (result.error) {
       // Traduzindo erros comuns para PT-BR
-      const msg = result.error.message.includes('Invalid login') 
-        ? 'Email ou senha incorretos.' 
-        : 'Ocorreu um erro ao tentar entrar.';
+      const msg = result.error.message.includes("Invalid login")
+        ? "Email ou senha incorretos."
+        : "Ocorreu um erro ao tentar entrar.";
       setError(msg);
       setIsSubmitting(false);
     } else {
-      navigate('/');
+      navigate("/");
     }
   };
 
@@ -35,7 +35,6 @@ export default function Login() {
     <div className="min-h-screen w-full bg-linear-to-br from-slate-900 via-blue-950 to-slate-900 flex items-center justify-center p-4">
       {/* Container Principal com Animação de Entrada */}
       <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-300">
-        
         {/* Cabeçalho do Card */}
         <div className="px-8 pt-10 pb-6 text-center">
           <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-blue-50 text-blue-600 mb-6 shadow-sm">
@@ -112,11 +111,11 @@ export default function Login() {
                 Acessando...
               </>
             ) : (
-              'Entrar no Sistema'
+              "Entrar no Sistema"
             )}
           </button>
         </form>
-        
+
         {/* Rodapé Decorativo */}
         <div className="px-8 py-4 bg-slate-50 border-t border-slate-100 text-center">
           <p className="text-xs text-slate-400">
