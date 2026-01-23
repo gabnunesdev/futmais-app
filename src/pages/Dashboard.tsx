@@ -33,7 +33,7 @@ import GameOverModal, {
 type ViewState = "LOBBY" | "DRAFT" | "MATCH";
 type PlayerStats = { goals: number; assists: number };
 
-// Modal Interno corrigido (sem useEffect de limpeza)
+// --- MODAL ADD PLAYER (Mantido igual) ---
 const AddLatePlayerModal = ({
   isOpen,
   onClose,
@@ -46,7 +46,6 @@ const AddLatePlayerModal = ({
   onAdd: (ids: string[]) => void;
 }) => {
   const [localSelected, setLocalSelected] = useState<string[]>([]);
-  // useEffect removido para evitar cascading render
 
   if (!isOpen) return null;
 
@@ -143,6 +142,7 @@ export default function Dashboard() {
     gameStateRef.current = gameState;
   }, [gameState]);
 
+  // --- CARREGAMENTO DE DADOS ---
   useEffect(() => {
     const loadInitialData = async () => {
       try {
@@ -244,6 +244,7 @@ export default function Dashboard() {
     loadInitialData();
   }, []);
 
+  // --- LÓGICA DO LOBBY ---
   const handleToggleLobby = async (playerId: string) => {
     let newOrder = [...selectedIds];
     if (newOrder.includes(playerId))
@@ -286,6 +287,75 @@ export default function Dashboard() {
     });
     setView("DRAFT");
   };
+
+  // --- NOVO: FUNÇÃO DE SORTEIO INTELIGENTE NO DRAFT ---
+ // --- FUNÇÃO DE SORTEIO INTELIGENTE NO DRAFT (Respeitando a Chegada) ---
+ const handleSmartShuffleDraft = () => {
+  // 1. Define o limite (Geralmente 12 jogadores)
+  const MAX_PLAYERS = PLAYERS_PER_TEAM * 2;
+
+  // 2. Separa os IDs: Quem joga (Top 12) e Quem espera (Resto)
+  const mainIds = selectedIds.slice(0, MAX_PLAYERS);
+  const queueIds = selectedIds.slice(MAX_PLAYERS);
+
+  // 3. Converte IDs em Objetos de Jogadores
+  const pool = mainIds
+    .map((id) => allPlayers.find((p) => p.id === id))
+    .filter((p): p is Player => !!p);
+
+  const queuePlayers = queueIds
+    .map((id) => allPlayers.find((p) => p.id === id))
+    .filter((p): p is Player => !!p);
+
+  // 4. Mistura aleatória LEVE no pool principal (apenas entre os 12)
+  // Isso evita que, se tiverem estrelas iguais, fiquem sempre nos mesmos times
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+
+  // 5. Ordena o pool por Estrelas (Do melhor para o pior)
+  pool.sort((a, b) => (b.stars || 3) - (a.stars || 3));
+
+  const red: Player[] = [];
+  const blue: Player[] = [];
+  let sumRed = 0;
+  let sumBlue = 0;
+
+  // 6. Distribuição "Gulosa" (Equilibrando Soma de Estrelas)
+  pool.forEach((player) => {
+    // Se um time encheu, vai pro outro
+    if (red.length >= PLAYERS_PER_TEAM) {
+      blue.push(player);
+      sumBlue += player.stars || 3;
+      return;
+    }
+    if (blue.length >= PLAYERS_PER_TEAM) {
+      red.push(player);
+      sumRed += player.stars || 3;
+      return;
+    }
+
+    // Se cabe em ambos, joga no time que está "mais fraco" no momento
+    const pStars = player.stars || 3;
+    if (sumRed <= sumBlue) {
+      red.push(player);
+      sumRed += pStars;
+    } else {
+      blue.push(player);
+      sumBlue += pStars;
+    }
+  });
+
+  // 7. Atualiza o estado
+  // red/blue: Apenas os 12 primeiros equilibrados
+  // queue: Quem chegou do 13º pra frente, sem mexer na ordem
+  setDraftState({
+    red,
+    blue,
+    queue: queuePlayers,
+  });
+};
 
   const movePlayer = (
     playerId: string,
@@ -415,7 +485,6 @@ export default function Dashboard() {
     });
 
     try {
-      // CORREÇÃO: Usar registerEvent, pois registerGoal não existe
       await matchService.registerEvent(currentMatchId, scorerId, "GOAL");
       if (assistId) {
         await matchService.registerEvent(currentMatchId, assistId, "ASSIST");
@@ -429,12 +498,11 @@ export default function Dashboard() {
   const handleEndMatch = async (winnerColor: "RED" | "BLUE") => {
     if (!gameState || !currentMatchId) return;
 
-    isEndingRef.current = true; // Trava o timer
+    isEndingRef.current = true;
 
     try {
       setLoading(true);
 
-      // 1. Finaliza no banco (O placar vai empatado, mas o winner_team será quem ganhou nos pênaltis)
       await matchService.finishMatch(
         currentMatchId,
         winnerColor,
@@ -442,14 +510,10 @@ export default function Dashboard() {
         gameState.scoreBlue
       );
 
-      // 2. Define vencedor (Lógica simplificada: não existe mais isDraw aqui)
       const redWins = winnerColor === "RED";
-
-      // Quem ganhou (nos pênaltis ou tempo normal) FICA.
       const winningTeam = redWins ? gameState.red : gameState.blue;
       const losingTeam = redWins ? gameState.blue : gameState.red;
 
-      // 3. Prepara desafiantes (Mesma lógica de antes)
       const waitingPlayers = gameState.queue.flatMap((t) => t.players);
       let challengerPlayers: Player[] = [];
       let newQueuePlayers: Player[] = [];
@@ -477,16 +541,13 @@ export default function Dashboard() {
         newQueuePlayers = sortedLosers.slice(needed);
       }
 
-      // 4. Define Cores (Vencedor Mantém Cor)
       let nextRed: Player[] = [];
       let nextBlue: Player[] = [];
 
       if (redWins) {
-        // Vermelho ganhou (ou venceu pênaltis) -> Fica Vermelho.
         nextRed = winningTeam.players;
         nextBlue = challengerPlayers;
       } else {
-        // Azul ganhou (ou venceu pênaltis) -> Fica Azul.
         nextRed = challengerPlayers;
         nextBlue = winningTeam.players;
       }
@@ -546,14 +607,12 @@ export default function Dashboard() {
 
     try {
       setLoading(true);
-      isEndingRef.current = true; // Para o timer
+      isEndingRef.current = true;
 
-      // 1. Calcula quem ganhou automaticamente pelo placar atual
       let finalWinner: "RED" | "BLUE" | "DRAW" = "DRAW";
       if (gameState.scoreRed > gameState.scoreBlue) finalWinner = "RED";
       if (gameState.scoreBlue > gameState.scoreRed) finalWinner = "BLUE";
 
-      // 2. Finaliza a partida no banco
       await matchService.finishMatch(
         currentMatchId,
         finalWinner,
@@ -561,7 +620,6 @@ export default function Dashboard() {
         gameState.scoreBlue
       );
 
-      // 3. Limpa estados locais e volta para Home
       setGameState(null);
       setDraftState(null);
       navigate("/");
@@ -594,7 +652,6 @@ export default function Dashboard() {
     }
     return () => {
       if (interval) clearInterval(interval);
-      // CORREÇÃO: Comentário para silenciar o warning do ESLint
       if (currentMatchId && gameStateRef.current && !isEndingRef.current) {
         matchService.updateMatchTimer(
           currentMatchId,
@@ -628,6 +685,7 @@ export default function Dashboard() {
     );
   }
 
+  // --- RENDERIZAÇÃO DO DRAFT ---
   if (view === "DRAFT" && draftState) {
     return (
       <Layout title="Ajuste os Times">
@@ -639,11 +697,14 @@ export default function Dashboard() {
           onConfirm={confirmMatchStart}
           onBack={() => setView("LOBBY")}
           onShare={handleShareTeams}
+          // --- Passando a nova função para o componente ---
+          onShuffle={handleSmartShuffleDraft}
         />
       </Layout>
     );
   }
 
+  // ... (Código do Modo MATCH permanece igual)
   const playersNotInGame = allPlayers.filter(
     (p) =>
       !gameState?.red.players.find((rp) => rp.id === p.id) &&
@@ -742,7 +803,6 @@ export default function Dashboard() {
                     curr ? { ...curr, isRunning: !curr.isRunning } : null
                   )
                 }
-                // Adicionamos o '?' antes do .isRunning em todos os lugares
                 className={`p-5 rounded-full transition-all active:scale-95 flex items-center justify-center ${
                   gameState?.isRunning
                     ? "bg-yellow-400 hover:bg-yellow-500 text-yellow-900 shadow-yellow-200"
@@ -763,24 +823,13 @@ export default function Dashboard() {
                     p ? { ...p, timer: 600, isRunning: false } : null
                   )
                 }
-                className="p-3 bg-slate-700 rounded-full text-slate-300"
+                className="p-3 bg-slate-700 rounded-full text-slate-300 hover:text-white"
+                title="Reiniciar Timer"
               >
                 <RotateCcw size={24} />
               </button>
-
-              {/* <button
-                onClick={() =>
-                  setGameState((p) =>
-                    p ? { ...p, timer: 5, isRunning: true } : null
-                  )
-                }
-                className="p-3 bg-purple-600 text-white rounded-full font-bold text-xs"
-                title="Pular para o final"
-              >
-                5s
-              </button> */}
             </div>
-            <div className="mt-6 pt-4 border-t border-slate-700 flex justify-center">
+            <div className="mt-6 pt-4 border-t border-slate-700 flex justify-center gap-2">
               <button
                 onClick={() => setHistoryModalOpen(true)}
                 className="text-slate-400 hover:text-white text-sm flex items-center gap-2 transition-colors px-3 py-1 rounded-full hover:bg-slate-800"

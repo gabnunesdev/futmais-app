@@ -159,4 +159,17 @@ export const matchService = {
     if (error) throw error;
     return data;
   },
+
+  
+  updateTeams: async (matchId: string, redIds: string[], blueIds: string[]) => {
+    const { error } = await supabase
+      .from("matches")
+      .update({
+        team_red_ids: redIds,
+        team_blue_ids: blueIds,
+      })
+      .eq("id", matchId);
+
+    if (error) throw error;
+  },
 };
