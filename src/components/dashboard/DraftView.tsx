@@ -1,17 +1,18 @@
-import {type Player } from '../../types';
-import { ArrowRightLeft, CheckCircle2, Share2, LogOut } from 'lucide-react';
+import { type Player } from '../../types';
+import { ArrowRightLeft, CheckCircle2, Share2, LogOut, Shuffle } from 'lucide-react';
 import { PLAYERS_PER_TEAM } from '../../domain/matchmaking/balancer';
 
-// 1. Adicionei lobbyOrder nas props da Coluna
+// 1. Interface da Coluna
 interface DraftColumnProps {
   title: string;
   color: 'red' | 'blue';
   players: Player[];
-  lobbyOrder: string[]; // <--- Nova prop para calcular a ordem
+  lobbyOrder: string[];
   onMove: (playerId: string) => void;
   onKick: (playerId: string) => void;
 }
 
+// 2. Interface Principal Atualizada
 interface DraftViewProps {
   draftState: { red: Player[], blue: Player[], queue: Player[] };
   selectedIds: string[];
@@ -20,9 +21,10 @@ interface DraftViewProps {
   onConfirm: () => void;
   onBack: () => void;
   onShare: () => void;
+  onShuffle?: () => void; // <--- Nova prop opcional para o sorteio
 }
 
-// 2. Componente da Coluna Atualizado com Visual de Dados
+// 3. Componente da Coluna (Mantido igual)
 const DraftColumn = ({ title, color, players, lobbyOrder, onMove, onKick }: DraftColumnProps) => (
   <div className={`p-3 rounded-xl border-t-4 bg-white shadow-sm ${color === 'red' ? 'border-red-500' : 'border-blue-500'}`}>
     <h3 className={`font-bold uppercase text-xs mb-3 flex justify-between ${color === 'red' ? 'text-red-600' : 'text-blue-600'}`}>
@@ -32,7 +34,6 @@ const DraftColumn = ({ title, color, players, lobbyOrder, onMove, onKick }: Draf
     
     <div className="space-y-2">
       {players.map((p: Player) => {
-        // Calcula a ordem de chegada
         const arrivalIndex = lobbyOrder.indexOf(p.id);
         const arrivalText = arrivalIndex !== -1 ? `${arrivalIndex + 1}º` : '-';
 
@@ -41,7 +42,6 @@ const DraftColumn = ({ title, color, players, lobbyOrder, onMove, onKick }: Draf
             
             {/* LADO ESQUERDO: INFOS */}
             <div className="flex items-center gap-2 overflow-hidden">
-                {/* Badge de Chegada */}
                 <div className="min-w-6 h-6 flex items-center justify-center bg-white border border-slate-200 rounded text-[10px] font-bold text-slate-500 shadow-sm" title={`Chegou em ${arrivalText}`}>
                     {arrivalText}
                 </div>
@@ -77,19 +77,35 @@ const DraftColumn = ({ title, color, players, lobbyOrder, onMove, onKick }: Draf
   </div>
 );
 
-export default function DraftView({ draftState, selectedIds, onMove, onRemoveFromQueue, onConfirm, onBack, onShare }: DraftViewProps) {
+// 4. Componente Principal Atualizado
+export default function DraftView({ draftState, selectedIds, onMove, onRemoveFromQueue, onConfirm, onBack, onShare, onShuffle }: DraftViewProps) {
   return (
     <>
       <div className="flex justify-between items-center mb-4">
           <h2 className="text-xl font-bold text-slate-700">Ajuste os Times</h2>
           <div className="flex gap-2">
-              <button onClick={onShare} className="bg-green-100 text-green-700 px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1 hover:bg-green-200"><Share2 size={14}/> Zap</button>
-              <button onClick={onBack} className="text-red-500 text-xs font-bold border border-red-200 px-3 py-1 rounded-lg hover:bg-red-50">Voltar</button>
+              {/* BOTÃO DE SORTEIO NOVO */}
+              {onShuffle && (
+                <button 
+                  onClick={onShuffle} 
+                  className="bg-slate-100 text-slate-600 px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1 hover:bg-slate-200 border border-slate-200"
+                  title="Sortear novamente (Equilibrado)"
+                >
+                    <Shuffle size={14}/> <span className="hidden sm:inline">Sortear</span>
+                </button>
+              )}
+
+              <button onClick={onShare} className="bg-green-100 text-green-700 px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1 hover:bg-green-200 border border-green-200">
+                  <Share2 size={14}/> <span className="hidden sm:inline">Zap</span>
+              </button>
+              
+              <button onClick={onBack} className="text-red-500 text-xs font-bold border border-red-200 px-3 py-1 rounded-lg hover:bg-red-50">
+                  Voltar
+              </button>
           </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {/* Passamos o selectedIds como lobbyOrder */}
         <DraftColumn 
             title="Time Vermelho" 
             color="red" 
