@@ -19,9 +19,11 @@ export default function Layout({ children, title, action }: LayoutProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const isDev = import.meta.env.DEV;
 
   // Verifica se estamos na página inicial
   const isHome = location.pathname === "/";
+  
 
   const menuItems = [
     { label: "Início", icon: HomeIcon, path: "/" },
@@ -37,6 +39,12 @@ export default function Layout({ children, title, action }: LayoutProps) {
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-slate-900 pb-10">
+      {/* FAIXA DE ALERTA DE DEV */}
+      {isDev && (
+        <div className="bg-yellow-400 text-yellow-900 text-xs font-bold text-center py-1 sticky top-0 z-60 shadow-sm">
+          🚧 AMBIENTE DE DESENVOLVIMENTO (Banco de Teste) 🚧
+        </div>
+      )}
       {/* --- HEADER GLOBAL (FIXO) --- */}
       <header className="bg-white border-b border-slate-200 sticky top-0 z-50 px-4 h-16 flex items-center justify-between shadow-sm">
         <div className="flex items-center gap-3">
