@@ -1,5 +1,5 @@
 import { UserPlus, ChevronUp, ChevronDown, MousePointer2, XCircle } from "lucide-react";
-import { type Team, type Player } from "../../types";
+import { type Team } from "../../types";
 
 interface QueueSectionProps {
   queue: Team[];

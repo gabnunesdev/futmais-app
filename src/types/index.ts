@@ -112,3 +112,9 @@ export type ViewState = "LOBBY" | "DRAFT" | "MATCH";
 export type PlayerStats = { goals: number; assists: number };
 export type GameOverReason = "GOAL_LIMIT" | "TIME_LIMIT" | "PENALTIES" | null;
 export type Period = "TODAY" | "MONTH" | "YEAR" | "ALL";
+
+export interface DraftState {
+  red: Player[];
+  blue: Player[];
+  queue: Player[];
+}

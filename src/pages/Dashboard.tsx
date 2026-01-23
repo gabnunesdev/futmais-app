@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import Layout from "../components/Layout";
 import GoalModal from "../components/GoalModal";
@@ -12,59 +12,83 @@ import DraftView from "../components/dashboard/DraftView";
 import ActiveTeamCard from "../components/dashboard/ActiveTeamCard";
 import GameOverModal, { type GameOverReason } from "../components/dashboard/GameOverModal";
 
-// Hooks customizados
+// Hooks
 import { useLobbyState } from "../hooks/useLobbyState";
 import { useDraftState } from "../hooks/useDraftState";
 import { useMatchTimer } from "../hooks/useMatchTimer";
+import { useDraftPersistence } from "../hooks/useDraftPersistence";
+import { useMatchState } from "../hooks/useMatchState";
+import { useMatchData } from "../hooks/useMatchData";
 
-// Utilitários
-import {
-  buildQueueTeams,
-  formatTeamsForShare,
-  calculateRemainingTimer,
-  calculateNextTeams,
-  movePlayerInQueue,
-  reorderQueue,
-} from "../utils/matchUtils";
-import {
-  calculateStatsFromEvents,
-  updateStatsOnGoal,
-  removeStatsOnEventDeleted,
-} from "../utils/statsUtils";
-
-// Services
-import { playerService } from "../services/playerService";
-import { matchService } from "../services/matchService";
-import { lobbyService } from "../services/lobbyService";
 import { generateTeams } from "../domain/matchmaking/balancer";
 
-import { type Player, type MatchState, type ViewState, type PlayerStats } from "../types";
+// Types e Utils
+import { type ViewState, type Player } from "../types";
+import { formatTeamsForShare } from "../utils/matchUtils";
 import { Loader2 } from "lucide-react";
 
 export default function Dashboard() {
   const navigate = useNavigate();
   const [view, setView] = useState<ViewState>("LOBBY");
-  const [loading, setLoading] = useState(true);
-  const [allPlayers, setAllPlayers] = useState<Player[]>([]);
   
-  // Estados da partida
-  const [gameState, setGameState] = useState<MatchState | null>(null);
-  const [currentMatchId, setCurrentMatchId] = useState<string | null>(null);
-  const [matchStats, setMatchStats] = useState<Record<string, PlayerStats>>({});
+  // UI Local State
   const [goalModalOpen, setGoalModalOpen] = useState(false);
   const [goalTeamColor, setGoalTeamColor] = useState<"red" | "blue" | null>(null);
   const [latePlayerModalOpen, setLatePlayerModalOpen] = useState(false);
   const [historyModalOpen, setHistoryModalOpen] = useState(false);
-  const [gameOverReason, setGameOverReason] = useState<GameOverReason | "MANUAL" | null>(null);
   const [movingPlayerId, setMovingPlayerId] = useState<string | null>(null);
-  
-  const isEndingRef = useRef(false);
 
-  // Hooks customizados
+  // Lifted State
+  const [allPlayers, setAllPlayers] = useState<Player[]>([]);
+
+  // 1. Lobby Hook
   const { selectedIds, handleToggleLobby, handleMoveUp, handleMoveDown, updateSelectedIds } = useLobbyState();
-  const { draftState, setDraftState, handleSmartShuffleDraft, movePlayer, handleQueueReorder, removeFromQueue } = useDraftState();
 
-  // Hook do cronômetro
+  // 2. Draft Hook
+  const { draftState, setDraftState, handleSmartShuffleDraft, movePlayer, handleQueueReorder, removeFromQueue } = useDraftState(null);
+
+  // 3. Persistence
+  const { loadFromStorage, clearBackup } = useDraftPersistence(
+    draftState,
+    selectedIds,
+    navigator.onLine
+  );
+
+  // 4. Match State Hook
+  const {
+    gameState,
+    setGameState,
+    currentMatchId,
+    setCurrentMatchId,
+    matchStats,
+    setMatchStats,
+    gameOverReason,
+    setGameOverReason,
+    isEndingRef,
+    loadingState: matchLoading,
+    handlers: matchHandlers
+  } = useMatchState({
+    setDraftState,
+    setView,
+    updateSelectedIds,
+    selectedIds,
+    allPlayers
+  });
+
+  // 5. Data Loading Hook
+  const { loading: dataLoading } = useMatchData({
+    updateSelectedIds,
+    setGameState,
+    setMatchStats,
+    setCurrentMatchId,
+    setDraftState,
+    loadFromStorage,
+    clearBackup,
+    setAllPlayers,
+    setView // Passando setView diretamente
+  });
+
+  // 6. Hook do cronômetro
   useMatchTimer({
     gameState,
     currentMatchId,
@@ -79,111 +103,13 @@ export default function Dashboard() {
     isEndingRef,
   });
 
+  // Efeitos Globais
   useEffect(() => {
     sessionStorage.setItem("is_admin", "true");
   }, []);
 
-  // Carregamento inicial de dados
-  useEffect(() => {
-    const loadInitialData = async () => {
-      try {
-        setLoading(true);
-        const [players, activeMatch, lobbyOrder] = await Promise.all([
-          playerService.getAll(),
-          matchService.getActiveMatch(),
-          lobbyService.getLobbyOrder(),
-        ]);
 
-        setAllPlayers(players);
-        if (lobbyOrder && lobbyOrder.length > 0) updateSelectedIds(lobbyOrder);
-
-        if (activeMatch) {
-          const getP = (id: string) => players.find((p: Player) => p.id === id);
-          const redPlayers = activeMatch.team_red_ids
-            .map(getP)
-            .filter(Boolean) as Player[];
-          const bluePlayers = activeMatch.team_blue_ids
-            .map(getP)
-            .filter(Boolean) as Player[];
-
-          let queuePlayers: Player[] = [];
-          if (activeMatch.queue_ids && activeMatch.queue_ids.length > 0) {
-            queuePlayers = activeMatch.queue_ids
-              .map(getP)
-              .filter(Boolean) as Player[];
-          } else {
-            const playingIds = [
-              ...activeMatch.team_red_ids,
-              ...activeMatch.team_blue_ids,
-            ];
-            queuePlayers = players.filter(
-              (p: Player) => !playingIds.includes(p.id) && p.is_active
-            );
-          }
-
-          const currentInGameOrQueue = [
-            ...activeMatch.team_red_ids,
-            ...activeMatch.team_blue_ids,
-            ...queuePlayers.map((p) => p.id),
-          ];
-          if (lobbyOrder.length > 0) {
-            updateSelectedIds(lobbyOrder);
-          } else if (currentInGameOrQueue.length > 0) {
-            updateSelectedIds(currentInGameOrQueue);
-          }
-
-          const events = await matchService.getMatchEvents(activeMatch.id);
-          const stats = calculateStatsFromEvents(events);
-          setMatchStats(stats);
-          setCurrentMatchId(activeMatch.id);
-
-          const calculatedTimer = calculateRemainingTimer(
-            activeMatch.duration_seconds ?? 600,
-            activeMatch.last_active_at
-          );
-
-          const queueTeams = buildQueueTeams(queuePlayers);
-
-          setGameState({
-            red: { name: "Time Vermelho", players: redPlayers },
-            blue: { name: "Time Azul", players: bluePlayers },
-            queue: queueTeams,
-            scoreRed: activeMatch.score_red,
-            scoreBlue: activeMatch.score_blue,
-            timer: calculatedTimer,
-            isRunning: true,
-            period: 1,
-          });
-          setView("MATCH");
-        } else {
-          // Tenta recuperar backup se existir
-          const backup = sessionStorage.getItem("draft_backup");
-          if (backup) {
-            try {
-              const parsed = JSON.parse(backup);
-              if (parsed.red && parsed.blue) {
-                setDraftState(parsed);
-                setView("DRAFT");
-                console.log("Estado de Draft recuperado do F5");
-              }
-            } catch (e) {
-              console.error("Erro ao recuperar backup", e);
-            }
-          } else {
-            setView("LOBBY");
-          }
-        }
-      } catch (error) {
-        console.error(error);
-        alert("Erro ao carregar dados.");
-      } finally {
-        setLoading(false);
-      }
-    };
-    loadInitialData();
-  }, [updateSelectedIds]);
-
-  // Handlers simplificados usando utilitários
+  // Handlers de View/UI (que nao estao nos hooks)
   const handleGoToDraft = () => {
     const checkedIn = selectedIds
       .map((id) => allPlayers.find((p) => p.id === id))
@@ -204,262 +130,10 @@ export default function Dashboard() {
     alert("Copiado!");
   };
 
-  const handleConfirmGoal = async (scorerId: string, assistId: string | null) => {
-    if (!gameState || !currentMatchId || !goalTeamColor) return;
-    
-    const newScoreRed = gameState.scoreRed + (goalTeamColor === "red" ? 1 : 0);
-    const newScoreBlue = gameState.scoreBlue + (goalTeamColor === "blue" ? 1 : 0);
+  // Renderização
+  const isLoading = dataLoading || matchLoading;
 
-    if (newScoreRed >= 2 || newScoreBlue >= 2) {
-      setGameOverReason("GOAL_LIMIT");
-      setGameState((prev) => (prev ? { ...prev, isRunning: false } : null));
-    }
-    
-    setGameState((prev) =>
-      prev ? { ...prev, scoreRed: newScoreRed, scoreBlue: newScoreBlue } : null
-    );
-
-    const newStats = updateStatsOnGoal(matchStats, scorerId, assistId);
-    setMatchStats(newStats);
-
-    try {
-      await matchService.registerEvent(currentMatchId, scorerId, "GOAL");
-      if (assistId) {
-        await matchService.registerEvent(currentMatchId, assistId, "ASSIST");
-      }
-      await matchService.updateScore(currentMatchId, newScoreRed, newScoreBlue);
-    } catch (error) {
-      console.error(error);
-    }
-  };
-
-  const confirmMatchStart = async () => {
-    if (!draftState) return;
-    setLoading(true);
-    try {
-      const queueIds = draftState.queue.map((p) => p.id);
-      const matchData = await matchService.startMatch(
-        draftState.red.map((p) => p.id),
-        draftState.blue.map((p) => p.id),
-        queueIds
-      );
-      setCurrentMatchId(matchData.id);
-      const queueTeams = buildQueueTeams(draftState.queue);
-
-      setGameState({
-        red: { name: "Time Vermelho", players: draftState.red },
-        blue: { name: "Time Azul", players: draftState.blue },
-        queue: queueTeams,
-        scoreRed: 0,
-        scoreBlue: 0,
-        timer: 600,
-        isRunning: false,
-        period: 1,
-      });
-      setMatchStats({});
-      setView("MATCH");
-    } catch (error) {
-      console.error(error);
-      alert("Erro ao iniciar");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleEventDeleted = async (
-    _eventId: string,
-    playerId: string,
-    type: "GOAL" | "ASSIST"
-  ) => {
-    if (!gameState || !currentMatchId) return;
-    const newStats = removeStatsOnEventDeleted(matchStats, playerId, type);
-    setMatchStats(newStats);
-
-    if (type === "GOAL") {
-      const isRed = gameState.red.players.some((p) => p.id === playerId);
-      const isBlue = gameState.blue.players.some((p) => p.id === playerId);
-      let newScoreRed = gameState.scoreRed;
-      let newScoreBlue = gameState.scoreBlue;
-      if (isRed) newScoreRed = Math.max(0, newScoreRed - 1);
-      if (isBlue) newScoreBlue = Math.max(0, newScoreBlue - 1);
-      setGameState((prev) =>
-        prev
-          ? { ...prev, scoreRed: newScoreRed, scoreBlue: newScoreBlue }
-          : null
-      );
-      try {
-        await matchService.updateScore(
-          currentMatchId,
-          newScoreRed,
-          newScoreBlue
-        );
-      } catch (error) {
-        console.error(error);
-      }
-    }
-  };
-
-  const handleEndMatch = async (winnerColor: "RED" | "BLUE") => {
-    if (!gameState || !currentMatchId) return;
-    isEndingRef.current = true;
-
-    try {
-      setLoading(true);
-      await matchService.finishMatch(
-        currentMatchId,
-        winnerColor,
-        gameState.scoreRed,
-        gameState.scoreBlue
-      );
-
-      const redWins = winnerColor === "RED";
-      const winningTeam = redWins ? gameState.red : gameState.blue;
-      const losingTeam = redWins ? gameState.blue : gameState.red;
-      const waitingPlayers = gameState.queue.flatMap((t) => t.players);
-
-      const nextTeams = calculateNextTeams(
-        winnerColor,
-        winningTeam,
-        losingTeam,
-        waitingPlayers,
-        selectedIds
-      );
-
-      setDraftState(nextTeams);
-      setMatchStats({});
-      setGameOverReason(null);
-      setView("DRAFT");
-    } catch (error) {
-      console.error(error);
-      alert("Erro ao finalizar partida");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleFinishDay = async () => {
-    const confirmEnd = window.confirm(
-      "Deseja realmente encerrar o racha por hoje?\n\nIsso irá:\n1. Finalizar a partida atual.\n2. Limpar a lista de presença (check-in).\n3. Apagar rascunhos salvos."
-    );
-
-    if (!confirmEnd) return;
-
-    try {
-      setLoading(true);
-      isEndingRef.current = true;
-
-      if (currentMatchId && gameState) {
-        let finalWinner: "RED" | "BLUE" | "DRAW" = "DRAW";
-        if (gameState.scoreRed > gameState.scoreBlue) finalWinner = "RED";
-        if (gameState.scoreBlue > gameState.scoreRed) finalWinner = "BLUE";
-
-        await matchService.finishMatch(
-          currentMatchId,
-          finalWinner,
-          gameState.scoreRed,
-          gameState.scoreBlue
-        );
-      }
-
-      sessionStorage.removeItem("draft_backup");
-      await lobbyService.updateLobbyOrder([]);
-
-      setGameState(null);
-      setDraftState(null);
-      updateSelectedIds([]);
-      setCurrentMatchId(null);
-
-      navigate("/");
-    } catch (error) {
-      console.error(error);
-      alert("Erro ao encerrar sessão.");
-      isEndingRef.current = false;
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleQuickMove = async (targetPlayerId: string) => {
-    if (!movingPlayerId || !gameState || !currentMatchId) return;
-
-    const currentQueueList = gameState.queue.flatMap((t) => t.players);
-    const newQueueList = movePlayerInQueue(
-      currentQueueList,
-      movingPlayerId,
-      targetPlayerId
-    );
-
-    const newTeams = buildQueueTeams(newQueueList);
-    setGameState({ ...gameState, queue: newTeams });
-    setMovingPlayerId(null);
-
-    try {
-      await matchService.updateQueue(
-        currentMatchId,
-        newQueueList.map((p) => p.id)
-      );
-    } catch (error) {
-      console.error("Erro ao salvar movimento rápido:", error);
-    }
-  };
-
-  const handleQueueReorderActiveMatch = async (
-    playerId: string,
-    direction: "up" | "down"
-  ) => {
-    if (!gameState || !currentMatchId) return;
-
-    const currentQueueList = gameState.queue.flatMap((t) => t.players);
-    const newQueueList = reorderQueue(currentQueueList, playerId, direction);
-
-    const newTeams = buildQueueTeams(newQueueList);
-    setGameState({
-      ...gameState,
-      queue: newTeams,
-    });
-
-    try {
-      await matchService.updateQueue(
-        currentMatchId,
-        newQueueList.map((p: Player) => p.id)
-      );
-    } catch (error) {
-      console.error("Erro ao atualizar fila:", error);
-    }
-  };
-
-  const handleAddLatePlayers = async (ids: string[]) => {
-    if (!gameState) return;
-
-    const updatedSelection = [...selectedIds, ...ids];
-    updateSelectedIds(updatedSelection);
-    await lobbyService.updateLobbyOrder(updatedSelection);
-
-    const newPlayers = ids
-      .map((id) => allPlayers.find((p) => p.id === id))
-      .filter((p): p is Player => !!p);
-
-    setGameState((prev) => {
-      if (!prev) return null;
-
-      const currentQueueList = prev.queue.flatMap((t) => t.players);
-      const newFullQueue = [...currentQueueList, ...newPlayers];
-
-      if (currentMatchId)
-        matchService
-          .updateQueue(
-            currentMatchId,
-            newFullQueue.map((p) => p.id)
-          )
-          .catch(console.error);
-
-      const newTeams = buildQueueTeams(newFullQueue);
-      return { ...prev, queue: newTeams };
-    });
-  };
-
-  // Renderização simplificada
-  if (loading) {
+  if (isLoading) {
     return (
       <Layout title="Carregando...">
         <div className="flex justify-center p-10">
@@ -492,7 +166,7 @@ export default function Dashboard() {
           selectedIds={selectedIds}
           onMove={movePlayer}
           onRemoveFromQueue={removeFromQueue}
-          onConfirm={confirmMatchStart}
+          onConfirm={() => matchHandlers.confirmMatchStart(draftState)}
           onBack={() => setView("LOBBY")}
           onShare={handleShareTeams}
           onShuffle={() => handleSmartShuffleDraft(allPlayers, selectedIds)}
@@ -502,18 +176,20 @@ export default function Dashboard() {
     );
   }
 
-  // View MATCH - muito mais limpo agora!
   return (
     <Layout title="Partida em Andamento">
       <GoalModal
         isOpen={goalModalOpen}
         onClose={() => setGoalModalOpen(false)}
-        onConfirm={handleConfirmGoal}
+        onConfirm={(scorer, assist) => {
+             if(goalTeamColor) matchHandlers.handleConfirmGoal(scorer, assist, goalTeamColor);
+             setGoalModalOpen(false);
+        }}
         teamName={goalTeamColor === "red" ? "Vermelho" : "Azul"}
         players={
           goalTeamColor === "red"
             ? gameState!.red.players
-            : gameState!.blue.players
+            : gameState?.blue.players || []
         }
       />
       
@@ -526,14 +202,14 @@ export default function Dashboard() {
             !gameState?.blue.players.find((bp) => bp.id === p.id) &&
             !gameState?.queue.flatMap((t) => t.players).find((qp) => qp.id === p.id)
         )}
-        onAdd={handleAddLatePlayers}
+        onAdd={matchHandlers.handleAddLatePlayers}
       />
       
       <EventHistoryModal
         isOpen={historyModalOpen}
         onClose={() => setHistoryModalOpen(false)}
         matchId={currentMatchId}
-        onEventDeleted={handleEventDeleted}
+        onEventDeleted={matchHandlers.handleEventDeleted}
       />
       
       <GameOverModal
@@ -541,66 +217,74 @@ export default function Dashboard() {
         reason={gameOverReason as GameOverReason}
         scoreRed={gameState?.scoreRed || 0}
         scoreBlue={gameState?.scoreBlue || 0}
-        onConfirm={(winner) => handleEndMatch(winner)}
+        onConfirm={(winner) => matchHandlers.handleEndMatch(winner)}
       />
       
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <ActiveTeamCard
-          color="red"
-          team={gameState!.red}
-          score={gameState!.scoreRed}
-          stats={matchStats}
-          onGoal={() => {
-            setGoalTeamColor("red");
-            setGoalModalOpen(true);
-          }}
-          lobbyOrder={selectedIds}
-        />
-        
-        <div className="flex flex-col items-center">
-          <TimerControls
-            gameState={gameState!}
-            onToggleTimer={() =>
-              setGameState((curr) =>
-                curr ? { ...curr, isRunning: !curr.isRunning } : null
-              )
-            }
-            onResetTimer={() =>
-              setGameState((p) =>
-                p ? { ...p, timer: 600, isRunning: false } : null
-              )
-            }
-            onViewHistory={() => setHistoryModalOpen(true)}
-          />
-          
-          <MatchControls
-            onEndMatch={() => setGameOverReason("MANUAL")}
-            onFinishDay={handleFinishDay}
-          />
-        </div>
-        
-        <ActiveTeamCard
-          color="blue"
-          team={gameState!.blue}
-          score={gameState!.scoreBlue}
-          stats={matchStats}
-          onGoal={() => {
-            setGoalTeamColor("blue");
-            setGoalModalOpen(true);
-          }}
-          lobbyOrder={selectedIds}
-        />
+        {gameState && (
+            <>
+                <ActiveTeamCard
+                color="red"
+                team={gameState.red}
+                score={gameState.scoreRed}
+                stats={matchStats}
+                onGoal={() => {
+                    setGoalTeamColor("red");
+                    setGoalModalOpen(true);
+                }}
+                lobbyOrder={selectedIds}
+                />
+                
+                <div className="flex flex-col items-center">
+                <TimerControls
+                    gameState={gameState}
+                    onToggleTimer={() =>
+                    setGameState((curr) =>
+                        curr ? { ...curr, isRunning: !curr.isRunning } : null
+                    )
+                    }
+                    onResetTimer={() =>
+                    setGameState((p) =>
+                        p ? { ...p, timer: 600, isRunning: false } : null
+                    )
+                    }
+                    onViewHistory={() => setHistoryModalOpen(true)}
+                />
+                
+                <MatchControls
+                    onEndMatch={() => setGameOverReason("MANUAL")}
+                    onFinishDay={() => matchHandlers.handleFinishDay(clearBackup, (path) => navigate(path))}
+                />
+                </div>
+                
+                <ActiveTeamCard
+                color="blue"
+                team={gameState.blue}
+                score={gameState.scoreBlue}
+                stats={matchStats}
+                onGoal={() => {
+                    setGoalTeamColor("blue");
+                    setGoalModalOpen(true);
+                }}
+                lobbyOrder={selectedIds}
+                />
+            </>
+        )}
       </div>
       
-      <QueueSection
-        queue={gameState!.queue}
-        selectedIds={selectedIds}
-        movingPlayerId={movingPlayerId}
-        onSetMovingPlayer={setMovingPlayerId}
-        onQuickMove={handleQuickMove}
-        onQueueReorder={handleQueueReorderActiveMatch}
-        onAddLatePlayers={() => setLatePlayerModalOpen(true)}
-      />
+      {gameState && (
+          <QueueSection
+            queue={gameState.queue}
+            selectedIds={selectedIds}
+            movingPlayerId={movingPlayerId}
+            onSetMovingPlayer={setMovingPlayerId}
+            onQuickMove={(target) => {
+                 if(movingPlayerId) matchHandlers.handleQuickMove(target, movingPlayerId);
+            }}
+            onQueueReorder={matchHandlers.handleQueueReorderActiveMatch}
+            onAddLatePlayers={() => setLatePlayerModalOpen(true)}
+          />
+      )}
     </Layout>
   );
 }

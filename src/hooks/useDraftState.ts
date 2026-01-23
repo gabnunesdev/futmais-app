@@ -2,6 +2,7 @@ import { useState, useCallback } from "react";
 import { type Player } from "../types";
 import { PLAYERS_PER_TEAM } from "../domain/matchmaking/balancer";
 import { reorderQueue } from "../utils/matchUtils";
+import { useDraftPersistence } from "./useDraftPersistence";
 
 interface DraftState {
   red: Player[];
@@ -9,8 +10,18 @@ interface DraftState {
   queue: Player[];
 }
 
-export function useDraftState(initialState: DraftState | null = null) {
+export function useDraftState(
+  initialState: DraftState | null = null,
+  selectedIds: string[] = []
+) {
   const [draftState, setDraftState] = useState<DraftState | null>(initialState);
+  
+  // Hook de persistência integrado (side-effect only)
+  useDraftPersistence(
+    draftState,
+    selectedIds,
+    navigator.onLine
+  );
 
   const handleSmartShuffleDraft = useCallback(
     (allPlayers: Player[], selectedIds: string[]) => {

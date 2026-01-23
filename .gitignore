@@ -14,6 +14,8 @@ dist-ssr
 .env*
 .DS_Store
 
+
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
@@ -24,3 +26,7 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+DASHBOARD_REFACTORED_EXAMPLE.tsx
+DRAFT_PERSISTENCE_IMPROVEMENTS.md
+REFACTORING_PLAN.md
+REFACTORING_SUMMARY.md
