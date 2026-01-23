@@ -233,7 +233,28 @@ export default function Dashboard() {
             period: 1,
           });
           setView("MATCH");
-        }
+        } else {
+          // --- MODIFICAÇÃO AQUI ---
+          
+          // 1. Tenta recuperar backup se existir
+          const backup = sessionStorage.getItem('draft_backup');
+          if (backup) {
+              try {
+                  const parsed = JSON.parse(backup);
+                  // Verifica se os dados parecem válidos
+                  if (parsed.red && parsed.blue) {
+                      setDraftState(parsed);
+                      setView("DRAFT");
+                      console.log("Estado de Draft recuperado do F5");
+                  }
+              } catch (e) {
+                  console.error("Erro ao recuperar backup", e);
+              }
+          } else {
+              // Comportamento padrão (vai pro Lobby)
+              setView("LOBBY");
+          }
+      }
       } catch (error) {
         console.error(error);
         alert("Erro ao carregar dados.");
