@@ -142,6 +142,23 @@ export default function Dashboard() {
     gameStateRef.current = gameState;
   }, [gameState]);
 
+  // --- NOVO: SALVAR ESTADO DO DRAFT NO NAVEGADOR (PARA AGUENTAR F5) ---
+  useEffect(() => {
+    // Se estiver no Draft, salva o estado atual
+    if (view === 'DRAFT' && draftState) {
+        sessionStorage.setItem('draft_backup', JSON.stringify(draftState));
+    } 
+    // Se saiu do draft (foi pro Lobby ou começou Jogo), limpa o backup
+    else if (view === 'LOBBY' || view === 'MATCH') {
+        // Só limpamos se estivermos no MATCH para garantir, 
+        // no LOBBY mantemos caso o usuário tenha clicado "Voltar" sem querer? 
+        // Melhor limpar apenas no MATCH para evitar sujeira.
+        if (view === 'MATCH') {
+            sessionStorage.removeItem('draft_backup');
+        }
+    }
+  }, [view, draftState]);
+
   // --- CARREGAMENTO DE DADOS ---
   useEffect(() => {
     const loadInitialData = async () => {
@@ -233,6 +250,25 @@ export default function Dashboard() {
             period: 1,
           });
           setView("MATCH");
+        } else {
+          const backup = sessionStorage.getItem('draft_backup');
+            if (backup) {
+                try {
+                    const parsed = JSON.parse(backup);
+                    // Verifica se os dados parecem válidos
+                    if (parsed.red && parsed.blue) {
+                        setDraftState(parsed);
+                        setView("DRAFT");
+                        console.log("Estado de Draft recuperado do F5");
+                    }
+                } catch (e) {
+                    console.error("Erro ao recuperar backup", e);
+                }
+            } else {
+                // Comportamento padrão (vai pro Lobby)
+                setView("LOBBY");
+            }
+        
         }
       } catch (error) {
         console.error(error);
@@ -503,6 +539,7 @@ export default function Dashboard() {
     try {
       setLoading(true);
 
+      // 1. Finaliza a partida no Banco
       await matchService.finishMatch(
         currentMatchId,
         winnerColor,
@@ -510,22 +547,32 @@ export default function Dashboard() {
         gameState.scoreBlue
       );
 
+      // 2. Define Vencedores e Perdedores
       const redWins = winnerColor === "RED";
       const winningTeam = redWins ? gameState.red : gameState.blue;
       const losingTeam = redWins ? gameState.blue : gameState.red;
 
+      // 3. Pega quem estava esperando
       const waitingPlayers = gameState.queue.flatMap((t) => t.players);
+      
       let challengerPlayers: Player[] = [];
       let newQueuePlayers: Player[] = [];
 
+      // 4. Lógica de Rotação (Quem entra e quem sobra)
       if (waitingPlayers.length >= PLAYERS_PER_TEAM) {
+        // Tem gente suficiente na fila para formar um time completo
         challengerPlayers = waitingPlayers.slice(0, PLAYERS_PER_TEAM);
+        
+        // A nova fila é: Quem sobrou da fila antiga + Os perdedores
         newQueuePlayers = [
           ...waitingPlayers.slice(PLAYERS_PER_TEAM),
           ...losingTeam.players,
         ];
       } else {
+        // Não tem gente suficiente, precisa completar com perdedores (Raro, mas acontece)
         const needed = PLAYERS_PER_TEAM - waitingPlayers.length;
+        
+        // Ordena perdedores pela ordem de chegada original para decidir quem joga de novo
         const sortedLosers = [...losingTeam.players].sort((a, b) => {
           const iA = selectedIds.indexOf(a.id);
           const iB = selectedIds.indexOf(b.id);
@@ -541,6 +588,7 @@ export default function Dashboard() {
         newQueuePlayers = sortedLosers.slice(needed);
       }
 
+      // 5. Define as Cores para o Próximo Jogo
       let nextRed: Player[] = [];
       let nextBlue: Player[] = [];
 
@@ -552,11 +600,32 @@ export default function Dashboard() {
         nextBlue = winningTeam.players;
       }
 
+      // 6. ATUALIZA O ESTADO VISUAL (Draft)
       setDraftState({
         red: nextRed,
         blue: nextBlue,
         queue: newQueuePlayers,
       });
+
+      // --- CORREÇÃO DO BUG AQUI ---
+      // 7. Atualiza a "Ordem de Chegada" Oficial (Persistência)
+      // A nova ordem oficial do mundo passa a ser:
+      // [Quem está no Vermelho] + [Quem está no Azul] + [Quem está na Fila]
+      // Isso garante que os perdedores sejam oficialmente movidos para o final da lista no banco.
+      
+      const newGlobalOrderIds = [
+        ...nextRed.map(p => p.id),
+        ...nextBlue.map(p => p.id),
+        ...newQueuePlayers.map(p => p.id)
+      ];
+
+      // Mantém no final da lista quem fez check-in mas não estava nesse jogo/fila (casos de borda)
+      const everyoneElse = selectedIds.filter(id => !newGlobalOrderIds.includes(id));
+      const finalOrder = [...newGlobalOrderIds, ...everyoneElse];
+
+      setSelectedIds(finalOrder); // Atualiza Local
+      await lobbyService.updateLobbyOrder(finalOrder); // Atualiza Banco (app_state)
+      // ----------------------------
 
       setMatchStats({});
       setGameOverReason(null);
