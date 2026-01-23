@@ -12,9 +12,25 @@ export function calculateStatsFromEvents(
   const stats: Record<string, PlayerStats> = {};
   events?.forEach((ev) => {
     if (!stats[ev.player_id])
-      stats[ev.player_id] = { goals: 0, assists: 0 };
-    if (ev.event_type === "GOAL") stats[ev.player_id].goals++;
-    if (ev.event_type === "ASSIST") stats[ev.player_id].assists++;
+      stats[ev.player_id] = { goals: 0, assists: 0, yellowCards: 0, redCards: 0 };
+    
+    // Processamento sequencial para garantir a regra de 2 amarelos = 1 vermelho
+    const p = stats[ev.player_id];
+    
+    if (ev.event_type === "GOAL") p.goals++;
+    if (ev.event_type === "ASSIST") p.assists++;
+    
+    if (ev.event_type === "YELLOW_CARD") {
+        p.yellowCards = (p.yellowCards || 0) + 1;
+        if (p.yellowCards === 2) {
+            p.yellowCards = 0;
+            p.redCards = (p.redCards || 0) + 1;
+        }
+    }
+    
+    if (ev.event_type === "RED_CARD") {
+        p.redCards = (p.redCards || 0) + 1;
+    }
   });
   return stats;
 }
@@ -42,6 +58,34 @@ export function updateStatsOnGoal(
 }
 
 /**
+ * Atualiza estatísticas quando um cartão é aplicado
+ * @param currentStats Estatísticas atuais
+ * @param playerId ID do jogador
+ * @param type Tipo do cartão ("YELLOW" | "RED")
+ * @returns Novas estatísticas atualizadas
+ */
+export function updateStatsOnCard(
+  currentStats: Record<string, PlayerStats>,
+  playerId: string,
+  type: "YELLOW" | "RED"
+): Record<string, PlayerStats> {
+    const stats = { ...currentStats };
+    const pStats = stats[playerId] || { goals: 0, assists: 0, yellowCards: 0, redCards: 0 };
+    
+    if (type === "YELLOW") {
+        const newYellows = (pStats.yellowCards || 0) + 1;
+        if (newYellows === 2) {
+            stats[playerId] = { ...pStats, yellowCards: 0, redCards: (pStats.redCards || 0) + 1 };
+        } else {
+            stats[playerId] = { ...pStats, yellowCards: newYellows };
+        }
+    } else {
+        stats[playerId] = { ...pStats, redCards: (pStats.redCards || 0) + 1 };
+    }
+    return stats;
+}
+
+/**
  * Remove estatísticas quando um evento é deletado
  * @param currentStats Estatísticas atuais
  * @param playerId ID do jogador
@@ -51,7 +95,7 @@ export function updateStatsOnGoal(
 export function removeStatsOnEventDeleted(
   currentStats: Record<string, PlayerStats>,
   playerId: string,
-  type: "GOAL" | "ASSIST"
+  type: "GOAL" | "ASSIST" | "YELLOW_CARD" | "RED_CARD"
 ): Record<string, PlayerStats> {
   const stats = { ...currentStats };
   if (stats[playerId]) {
@@ -65,6 +109,31 @@ export function removeStatsOnEventDeleted(
         ...stats[playerId],
         assists: Math.max(0, stats[playerId].assists - 1),
       };
+    if (type === "YELLOW_CARD") {
+        // Se tem 0 amarelos e >0 vermelhos, assume que foi revertido de 2 amarelos
+        const currentYellows = stats[playerId].yellowCards || 0;
+        const currentReds = stats[playerId].redCards || 0;
+        
+        if (currentYellows === 0 && currentReds > 0) {
+            // Reverter conversão: Remove 1 Vermelho, Volta para 1 Amarelo
+            stats[playerId] = {
+                ...stats[playerId],
+                redCards: currentReds - 1,
+                yellowCards: 1
+            };
+        } else {
+            // Apenas remove o amarelo
+             stats[playerId] = {
+                ...stats[playerId],
+                yellowCards: Math.max(0, currentYellows - 1),
+            };
+        }
+    }
+    if (type === "RED_CARD")
+        stats[playerId] = {
+            ...stats[playerId],
+            redCards: Math.max(0, (stats[playerId].redCards || 0) - 1),
+        };
   }
   return stats;
 }

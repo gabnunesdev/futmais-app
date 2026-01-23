@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import Layout from "../components/Layout";
-import GoalModal from "../components/GoalModal";
+import PlayerActionModal from "../components/PlayerActionModal";
 import EventHistoryModal from "../components/EventHistoryModal";
 import AddLatePlayerModal from "../components/dashboard/AddLatePlayerModal";
 import TimerControls from "../components/dashboard/TimerControls";
@@ -32,11 +32,23 @@ export default function Dashboard() {
   const [view, setView] = useState<ViewState>("LOBBY");
   
   // UI Local State
-  const [goalModalOpen, setGoalModalOpen] = useState(false);
-  const [goalTeamColor, setGoalTeamColor] = useState<"red" | "blue" | null>(null);
+  // UI Local State
+  const [actionModalOpen, setActionModalOpen] = useState(false);
+  const [selectedPlayer, setSelectedPlayer] = useState<Player | null>(null);
+  const [selectedTeamColor, setSelectedTeamColor] = useState<"red" | "blue" | null>(null);
+  const [suspendedPlayers, setSuspendedPlayers] = useState<Record<string, number>>({});
+  
   const [latePlayerModalOpen, setLatePlayerModalOpen] = useState(false);
   const [historyModalOpen, setHistoryModalOpen] = useState(false);
   const [movingPlayerId, setMovingPlayerId] = useState<string | null>(null);
+
+  // Wrapper para limpar suspensões ao sair da tela de jogo
+  const handleSetView = (newView: ViewState) => {
+    setView(newView);
+    if (newView !== "MATCH") {
+      setSuspendedPlayers({});
+    }
+  };
 
   // Lifted State
   const [allPlayers, setAllPlayers] = useState<Player[]>([]);
@@ -69,7 +81,7 @@ export default function Dashboard() {
     handlers: matchHandlers
   } = useMatchState({
     setDraftState,
-    setView,
+    setView: handleSetView,
     updateSelectedIds,
     selectedIds,
     allPlayers
@@ -85,7 +97,7 @@ export default function Dashboard() {
     loadFromStorage,
     clearBackup,
     setAllPlayers,
-    setView // Passando setView diretamente
+    setView: handleSetView
   });
 
   // 6. Hook do cronômetro
@@ -107,6 +119,25 @@ export default function Dashboard() {
   useEffect(() => {
     sessionStorage.setItem("is_admin", "true");
   }, []);
+
+  // Timer de suspensão (Cartão Vermelho)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setSuspendedPlayers((prev) => {
+        const next = { ...prev };
+        let changed = false;
+        Object.keys(next).forEach((key) => {
+          if (next[key] > 0) {
+            next[key] -= 1;
+            changed = true;
+          }
+        });
+        return changed ? next : prev;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
 
 
   // Handlers de View/UI (que nao estao nos hooks)
@@ -178,19 +209,54 @@ export default function Dashboard() {
 
   return (
     <Layout title="Partida em Andamento">
-      <GoalModal
-        isOpen={goalModalOpen}
-        onClose={() => setGoalModalOpen(false)}
-        onConfirm={(scorer, assist) => {
-             if(goalTeamColor) matchHandlers.handleConfirmGoal(scorer, assist, goalTeamColor);
-             setGoalModalOpen(false);
+
+      <PlayerActionModal
+        isOpen={actionModalOpen}
+        onClose={() => {
+            setActionModalOpen(false);
+            setSelectedPlayer(null);
         }}
-        teamName={goalTeamColor === "red" ? "Vermelho" : "Azul"}
-        players={
-          goalTeamColor === "red"
-            ? gameState!.red.players
+        player={selectedPlayer}
+        teammates={
+            selectedTeamColor === "red"
+            ? gameState?.red.players || []
             : gameState?.blue.players || []
         }
+        availablePlayers={
+            gameState ? [
+                ...gameState.queue.flatMap(t => t.players),
+                ...allPlayers.filter(p => 
+                    !gameState.red.players.find(rp => rp.id === p.id) &&
+                    !gameState.blue.players.find(bp => bp.id === p.id) &&
+                    !gameState.queue.flatMap(t => t.players).find(qp => qp.id === p.id)
+                )
+            ] : []
+        }
+        onRecordGoal={(assistId) => {
+            if(selectedPlayer && selectedTeamColor) {
+                matchHandlers.handleConfirmGoal(selectedPlayer.id, assistId, selectedTeamColor);
+            }
+        }}
+        onCard={(type) => {
+            if(selectedPlayer) {
+                // Verificar se é o segundo amarelo (que vira vermelho)
+                const currentStats = matchStats[selectedPlayer.id] || { goals: 0, assists: 0, yellowCards: 0, redCards: 0 };
+                const isSecondYellow = type === "YELLOW" && (currentStats.yellowCards || 0) === 1;
+
+                matchHandlers.handleCard(selectedPlayer.id, type);
+                
+                // Lógica de suspensão temporária (2 min)
+                // Aciona se for Vermelho direto OU se for o segundo amarelo
+                if(type === "RED" || isSecondYellow) {
+                    setSuspendedPlayers(prev => ({...prev, [selectedPlayer.id]: 120}));
+                }
+            }
+        }}
+        onSubstitute={(newPlayerId) => {
+            if(selectedPlayer) {
+                matchHandlers.handleSubstitution(selectedPlayer.id, newPlayerId);
+            }
+        }}
       />
       
       <AddLatePlayerModal
@@ -228,9 +294,11 @@ export default function Dashboard() {
                 team={gameState.red}
                 score={gameState.scoreRed}
                 stats={matchStats}
-                onGoal={() => {
-                    setGoalTeamColor("red");
-                    setGoalModalOpen(true);
+                suspendedPlayers={suspendedPlayers}
+                onPlayerClick={(p) => {
+                    setSelectedPlayer(p);
+                    setSelectedTeamColor("red");
+                    setActionModalOpen(true);
                 }}
                 lobbyOrder={selectedIds}
                 />
@@ -262,9 +330,11 @@ export default function Dashboard() {
                 team={gameState.blue}
                 score={gameState.scoreBlue}
                 stats={matchStats}
-                onGoal={() => {
-                    setGoalTeamColor("blue");
-                    setGoalModalOpen(true);
+                suspendedPlayers={suspendedPlayers}
+                onPlayerClick={(p) => {
+                    setSelectedPlayer(p);
+                    setSelectedTeamColor("blue");
+                    setActionModalOpen(true);
                 }}
                 lobbyOrder={selectedIds}
                 />

@@ -2,7 +2,7 @@ import { useState, useRef } from "react";
 import { matchService } from "../services/matchService";
 import { lobbyService } from "../services/lobbyService";
 import type { Player, MatchState, PlayerStats, ViewState, DraftState, GameOverReason } from "../types";
-import { updateStatsOnGoal, removeStatsOnEventDeleted } from "../utils/statsUtils";
+import { updateStatsOnGoal, removeStatsOnEventDeleted, updateStatsOnCard } from "../utils/statsUtils";
 import { calculateNextTeams, buildQueueTeams, movePlayerInQueue, reorderQueue } from "../utils/matchUtils";
 
 interface UseMatchStateProps {
@@ -89,6 +89,91 @@ export function useMatchState({
       } catch (error) {
         console.error(error);
       }
+    }
+  };
+
+  const handleCard = async (playerId: string, type: "YELLOW" | "RED") => {
+    if (!gameState || !currentMatchId) return;
+
+    // Atualiza Stats (Local)
+    const newStats = updateStatsOnCard(matchStats, playerId, type);
+    setMatchStats(newStats);
+
+    // Tenta salvar no backend (Eventos de cartão)
+    try {
+        const eventType = type === "YELLOW" ? "YELLOW_CARD" : "RED_CARD";
+        await matchService.registerEvent(currentMatchId, playerId, eventType);
+    } catch (error) {
+        console.error("Erro ao registrar cartão:", error);
+    }
+  };
+
+  const handleSubstitution = async (playerOutId: string, playerInId: string) => {
+    if (!gameState || !currentMatchId) return;
+
+    // 1. Identificar onde está o Player Out
+    const isRed = gameState.red.players.some(p => p.id === playerOutId);
+    const isBlue = gameState.blue.players.some(p => p.id === playerOutId);
+
+    if (!isRed && !isBlue) return; // Jogador não está jogando
+
+    // 2. Encontrar o Player In (pode estar na fila ou na lista geral)
+    // Se estiver na fila, removemos de lá.
+    const queueList = gameState.queue.flatMap(t => t.players);
+    const playerInIndex = queueList.findIndex(p => p.id === playerInId);
+    
+    // Se não achar na fila, busca em allPlayers (caso esteja na "bancada" sem time)
+    const playerIn = playerInIndex !== -1 
+        ? queueList[playerInIndex] 
+        : allPlayers.find(p => p.id === playerInId);
+
+    if (!playerIn) return; // Jogador novo não encontrado
+
+    // 3. Montar novos times
+    let newRed = [...gameState.red.players];
+    let newBlue = [...gameState.blue.players];
+    let newQueue = [...queueList];
+
+    // Remover Player In da fila se estiver lá
+    if (playerInIndex !== -1) {
+        newQueue.splice(playerInIndex, 1);
+    }
+    
+    // Pegar o objeto completo do playerOut
+    const playerOut = isRed 
+        ? newRed.find(p => p.id === playerOutId)!
+        : newBlue.find(p => p.id === playerOutId)!;
+
+    // Realizar a troca nos times
+    if (isRed) {
+        newRed = newRed.map(p => p.id === playerOutId ? playerIn : p);
+    } else {
+        newBlue = newBlue.map(p => p.id === playerOutId ? playerIn : p);
+    }
+
+    // Colocar o Player Out no final da fila
+    newQueue.push(playerOut);
+    
+    // 4. Atualizar Estado Local
+    const newQueueTeams = buildQueueTeams(newQueue);
+    
+    setGameState({
+        ...gameState,
+        red: { ...gameState.red, players: newRed },
+        blue: { ...gameState.blue, players: newBlue },
+        queue: newQueueTeams
+    });
+
+    // 5. Atualizar Backend
+    try {
+        await matchService.substitutePlayer(
+            currentMatchId,
+            newRed.map(p => p.id),
+            newBlue.map(p => p.id),
+            newQueue.map(p => p.id)
+        );
+    } catch (error) {
+        console.error("Erro ao realizar substituição:", error);
     }
   };
 
@@ -301,7 +386,10 @@ export function useMatchState({
       handleFinishDay,
       handleQuickMove,
       handleQueueReorderActiveMatch,
-      handleAddLatePlayers
+      handleQueueReorderActiveMatch,
+      handleAddLatePlayers,
+      handleCard,
+      handleSubstitution
     }
   };
 }
