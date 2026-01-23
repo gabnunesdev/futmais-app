@@ -1,8 +1,16 @@
 import { type Player } from '../../types';
-import { ArrowRightLeft, CheckCircle2, Share2, LogOut, Shuffle } from 'lucide-react';
+import { 
+  ArrowRightLeft, 
+  CheckCircle2, 
+  Share2, 
+  LogOut, 
+  Shuffle, 
+  ChevronUp,   // <--- Novo Import
+  ChevronDown  // <--- Novo Import
+} from 'lucide-react';
 import { PLAYERS_PER_TEAM } from '../../domain/matchmaking/balancer';
 
-// 1. Interface da Coluna
+// --- 1. Interface da Coluna (Times) ---
 interface DraftColumnProps {
   title: string;
   color: 'red' | 'blue';
@@ -12,7 +20,7 @@ interface DraftColumnProps {
   onKick: (playerId: string) => void;
 }
 
-// 2. Interface Principal Atualizada
+// --- 2. Interface Principal Atualizada ---
 interface DraftViewProps {
   draftState: { red: Player[], blue: Player[], queue: Player[] };
   selectedIds: string[];
@@ -21,10 +29,11 @@ interface DraftViewProps {
   onConfirm: () => void;
   onBack: () => void;
   onShare: () => void;
-  onShuffle?: () => void; // <--- Nova prop opcional para o sorteio
+  onShuffle?: () => void;
+  onQueueReorder: (playerId: string, direction: "up" | "down") => void; // <--- Nova Prop Obrigatória
 }
 
-// 3. Componente da Coluna (Mantido igual)
+// --- 3. Componente Auxiliar: Coluna de Time (Vermelho/Azul) ---
 const DraftColumn = ({ title, color, players, lobbyOrder, onMove, onKick }: DraftColumnProps) => (
   <div className={`p-3 rounded-xl border-t-4 bg-white shadow-sm ${color === 'red' ? 'border-red-500' : 'border-blue-500'}`}>
     <h3 className={`font-bold uppercase text-xs mb-3 flex justify-between ${color === 'red' ? 'text-red-600' : 'text-blue-600'}`}>
@@ -77,14 +86,13 @@ const DraftColumn = ({ title, color, players, lobbyOrder, onMove, onKick }: Draf
   </div>
 );
 
-// 4. Componente Principal Atualizado
-export default function DraftView({ draftState, selectedIds, onMove, onRemoveFromQueue, onConfirm, onBack, onShare, onShuffle }: DraftViewProps) {
+// --- 4. Componente Principal (DRAFT VIEW) ---
+export default function DraftView({ draftState, selectedIds, onMove, onRemoveFromQueue, onConfirm, onBack, onShare, onShuffle, onQueueReorder }: DraftViewProps) {
   return (
     <>
       <div className="flex justify-between items-center mb-4">
           <h2 className="text-xl font-bold text-slate-700">Ajuste os Times</h2>
           <div className="flex gap-2">
-              {/* BOTÃO DE SORTEIO NOVO */}
               {onShuffle && (
                 <button 
                   onClick={onShuffle} 
@@ -106,6 +114,7 @@ export default function DraftView({ draftState, selectedIds, onMove, onRemoveFro
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {/* COLUNA 1: TIME VERMELHO */}
         <DraftColumn 
             title="Time Vermelho" 
             color="red" 
@@ -115,6 +124,7 @@ export default function DraftView({ draftState, selectedIds, onMove, onRemoveFro
             onKick={(pid) => onMove(pid, 'red', 'queue')} 
         />
         
+        {/* COLUNA 2: TIME AZUL */}
         <DraftColumn 
             title="Time Azul" 
             color="blue" 
@@ -124,30 +134,64 @@ export default function DraftView({ draftState, selectedIds, onMove, onRemoveFro
             onKick={(pid) => onMove(pid, 'blue', 'queue')} 
         />
         
-        {/* COLUNA DO BANCO / FILA */}
+        {/* COLUNA 3: BANCO / FILA (AQUI ESTÁ A LÓGICA NOVA) */}
         <div className="bg-slate-100 p-3 rounded-xl border border-slate-200">
           <h3 className="font-bold text-slate-600 text-xs uppercase mb-3">Banco / Próximos</h3>
+          
           <div className="space-y-2">
-            {draftState.queue.map(p => {
+            {draftState.queue.map((p, index) => {
               const arrivalIndex = selectedIds.indexOf(p.id);
               const arrivalText = arrivalIndex !== -1 ? `${arrivalIndex + 1}º` : '-';
               
+              // Calcula visualmente em qual "Time" da fila ele está
+              const queueTeamNumber = Math.floor(index / PLAYERS_PER_TEAM) + 3;
+              const isFirstInTeam = index % PLAYERS_PER_TEAM === 0;
+
               return (
-                  <div key={p.id} className="bg-white p-2 rounded border flex justify-between items-center">
-                    <div className="flex items-center gap-2 overflow-hidden">
-                        <span className="bg-slate-200 text-slate-600 text-[10px] font-bold px-1.5 py-0.5 rounded min-w-6 text-center" title="Ordem de chegada">
-                            {arrivalText}
-                        </span>
-                        <div className="flex flex-col truncate">
-                            <span className="text-sm font-medium text-slate-700 truncate">{p.name}</span>
-                            <span className="text-[10px] text-yellow-500 leading-none">{'⭐'.repeat(p.stars)}</span>
+                  <div key={p.id}>
+                    {/* Cabeçalho visual separando os times da fila */}
+                    {isFirstInTeam && (
+                        <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-2 mb-1 pl-1 border-b border-slate-200 pb-0.5">
+                            Time {queueTeamNumber}
                         </div>
-                    </div>
-                    
-                    <div className="flex gap-1 shrink-0">
-                        <button onClick={() => onMove(p.id, 'queue', 'red')} className="text-[10px] bg-red-100 text-red-600 px-2 py-1 rounded hover:bg-red-200 font-bold border border-red-200">VER</button>
-                        <button onClick={() => onMove(p.id, 'queue', 'blue')} className="text-[10px] bg-blue-100 text-blue-600 px-2 py-1 rounded hover:bg-blue-200 font-bold border border-blue-200">AZU</button>
-                        <button onClick={() => onRemoveFromQueue(p.id)} title="Foi embora" className="text-xs bg-slate-100 text-slate-400 px-2 py-1 rounded hover:bg-slate-200 border border-slate-200"><LogOut size={12}/></button>
+                    )}
+
+                    <div className="bg-white p-2 rounded border flex justify-between items-center group hover:border-blue-300 transition-colors">
+                        <div className="flex items-center gap-2 overflow-hidden">
+                            {/* Botoes de Reordenar (Esquerda) */}
+                            <div className="flex flex-col gap-0.5 mr-1">
+                                <button 
+                                    onClick={() => onQueueReorder(p.id, 'up')}
+                                    disabled={index === 0}
+                                    className="p-0.5 hover:bg-slate-100 rounded text-slate-400 hover:text-blue-600 disabled:opacity-20 transition-colors"
+                                    title="Subir na fila"
+                                >
+                                    <ChevronUp size={14} />
+                                </button>
+                                <button 
+                                    onClick={() => onQueueReorder(p.id, 'down')}
+                                    disabled={index === draftState.queue.length - 1}
+                                    className="p-0.5 hover:bg-slate-100 rounded text-slate-400 hover:text-blue-600 disabled:opacity-20 transition-colors"
+                                    title="Descer na fila"
+                                >
+                                    <ChevronDown size={14} />
+                                </button>
+                            </div>
+
+                            <span className="bg-slate-200 text-slate-600 text-[10px] font-bold px-1.5 py-0.5 rounded min-w-6 text-center" title="Ordem de chegada original">
+                                {arrivalText}
+                            </span>
+                            <div className="flex flex-col truncate">
+                                <span className="text-sm font-medium text-slate-700 truncate">{p.name}</span>
+                                <span className="text-[10px] text-yellow-500 leading-none">{'⭐'.repeat(p.stars)}</span>
+                            </div>
+                        </div>
+                        
+                        <div className="flex gap-1 shrink-0">
+                            <button onClick={() => onMove(p.id, 'queue', 'red')} className="text-[10px] bg-red-50 text-red-600 px-2 py-1 rounded hover:bg-red-100 font-bold border border-red-100">VER</button>
+                            <button onClick={() => onMove(p.id, 'queue', 'blue')} className="text-[10px] bg-blue-50 text-blue-600 px-2 py-1 rounded hover:bg-blue-100 font-bold border border-blue-100">AZU</button>
+                            <button onClick={() => onRemoveFromQueue(p.id)} className="text-xs text-slate-300 hover:text-red-500 px-1 ml-1" title="Remover da fila"><LogOut size={14}/></button>
+                        </div>
                     </div>
                   </div>
               );

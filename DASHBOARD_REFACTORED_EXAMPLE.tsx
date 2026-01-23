@@ -1,3 +1,10 @@
+/**
+ * EXEMPLO DE COMO O Dashboard.tsx FICARIA APÓS REFATORAÇÃO
+ * 
+ * Este é apenas um exemplo mostrando a estrutura refatorada.
+ * O arquivo real Dashboard.tsx ainda não foi modificado.
+ */
+
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import Layout from "../components/Layout";
@@ -18,27 +25,16 @@ import { useDraftState } from "../hooks/useDraftState";
 import { useMatchTimer } from "../hooks/useMatchTimer";
 
 // Utilitários
-import {
-  buildQueueTeams,
-  formatTeamsForShare,
-  calculateRemainingTimer,
-  calculateNextTeams,
-  movePlayerInQueue,
-  reorderQueue,
-} from "../utils/matchUtils";
-import {
-  calculateStatsFromEvents,
-  updateStatsOnGoal,
-  removeStatsOnEventDeleted,
-} from "../utils/statsUtils";
+import { buildQueueTeams, formatTeamsForShare, calculateRemainingTimer, calculateNextTeams } from "../utils/matchUtils";
+import { calculateStatsFromEvents, updateStatsOnGoal, removeStatsOnEventDeleted } from "../utils/statsUtils";
 
 // Services
 import { playerService } from "../services/playerService";
 import { matchService } from "../services/matchService";
 import { lobbyService } from "../services/lobbyService";
-import { generateTeams } from "../domain/matchmaking/balancer";
+import { generateTeams, PLAYERS_PER_TEAM } from "../domain/matchmaking/balancer";
 
-import { type Player, type MatchState, type ViewState, type PlayerStats } from "../types";
+import { type Player, type MatchState, type Team, type ViewState, type PlayerStats } from "../types";
 import { Loader2 } from "lucide-react";
 
 export default function Dashboard() {
@@ -79,10 +75,6 @@ export default function Dashboard() {
     isEndingRef,
   });
 
-  useEffect(() => {
-    sessionStorage.setItem("is_admin", "true");
-  }, []);
-
   // Carregamento inicial de dados
   useEffect(() => {
     const loadInitialData = async () => {
@@ -98,80 +90,22 @@ export default function Dashboard() {
         if (lobbyOrder && lobbyOrder.length > 0) updateSelectedIds(lobbyOrder);
 
         if (activeMatch) {
+          // ... lógica de carregamento da partida ativa usando utilitários
           const getP = (id: string) => players.find((p: Player) => p.id === id);
-          const redPlayers = activeMatch.team_red_ids
-            .map(getP)
-            .filter(Boolean) as Player[];
-          const bluePlayers = activeMatch.team_blue_ids
-            .map(getP)
-            .filter(Boolean) as Player[];
-
-          let queuePlayers: Player[] = [];
-          if (activeMatch.queue_ids && activeMatch.queue_ids.length > 0) {
-            queuePlayers = activeMatch.queue_ids
-              .map(getP)
-              .filter(Boolean) as Player[];
-          } else {
-            const playingIds = [
-              ...activeMatch.team_red_ids,
-              ...activeMatch.team_blue_ids,
-            ];
-            queuePlayers = players.filter(
-              (p: Player) => !playingIds.includes(p.id) && p.is_active
-            );
-          }
-
-          const currentInGameOrQueue = [
-            ...activeMatch.team_red_ids,
-            ...activeMatch.team_blue_ids,
-            ...queuePlayers.map((p) => p.id),
-          ];
-          if (lobbyOrder.length > 0) {
-            updateSelectedIds(lobbyOrder);
-          } else if (currentInGameOrQueue.length > 0) {
-            updateSelectedIds(currentInGameOrQueue);
-          }
-
+          const redPlayers = activeMatch.team_red_ids.map(getP).filter(Boolean) as Player[];
+          const bluePlayers = activeMatch.team_blue_ids.map(getP).filter(Boolean) as Player[];
+          
+          // ... resto da lógica usando utilitários
           const events = await matchService.getMatchEvents(activeMatch.id);
           const stats = calculateStatsFromEvents(events);
           setMatchStats(stats);
-          setCurrentMatchId(activeMatch.id);
-
+          
           const calculatedTimer = calculateRemainingTimer(
             activeMatch.duration_seconds ?? 600,
             activeMatch.last_active_at
           );
-
-          const queueTeams = buildQueueTeams(queuePlayers);
-
-          setGameState({
-            red: { name: "Time Vermelho", players: redPlayers },
-            blue: { name: "Time Azul", players: bluePlayers },
-            queue: queueTeams,
-            scoreRed: activeMatch.score_red,
-            scoreBlue: activeMatch.score_blue,
-            timer: calculatedTimer,
-            isRunning: true,
-            period: 1,
-          });
-          setView("MATCH");
-        } else {
-          // Tenta recuperar backup se existir
-          const backup = sessionStorage.getItem("draft_backup");
-          if (backup) {
-            try {
-              const parsed = JSON.parse(backup);
-              if (parsed.red && parsed.blue) {
-                setDraftState(parsed);
-                setView("DRAFT");
-                console.log("Estado de Draft recuperado do F5");
-              }
-            } catch (e) {
-              console.error("Erro ao recuperar backup", e);
-            }
-          } else {
-            setView("LOBBY");
-          }
+          
+          // ... resto do setup
         }
       } catch (error) {
         console.error(error);
@@ -233,72 +167,6 @@ export default function Dashboard() {
     }
   };
 
-  const confirmMatchStart = async () => {
-    if (!draftState) return;
-    setLoading(true);
-    try {
-      const queueIds = draftState.queue.map((p) => p.id);
-      const matchData = await matchService.startMatch(
-        draftState.red.map((p) => p.id),
-        draftState.blue.map((p) => p.id),
-        queueIds
-      );
-      setCurrentMatchId(matchData.id);
-      const queueTeams = buildQueueTeams(draftState.queue);
-
-      setGameState({
-        red: { name: "Time Vermelho", players: draftState.red },
-        blue: { name: "Time Azul", players: draftState.blue },
-        queue: queueTeams,
-        scoreRed: 0,
-        scoreBlue: 0,
-        timer: 600,
-        isRunning: false,
-        period: 1,
-      });
-      setMatchStats({});
-      setView("MATCH");
-    } catch (error) {
-      console.error(error);
-      alert("Erro ao iniciar");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleEventDeleted = async (
-    _eventId: string,
-    playerId: string,
-    type: "GOAL" | "ASSIST"
-  ) => {
-    if (!gameState || !currentMatchId) return;
-    const newStats = removeStatsOnEventDeleted(matchStats, playerId, type);
-    setMatchStats(newStats);
-
-    if (type === "GOAL") {
-      const isRed = gameState.red.players.some((p) => p.id === playerId);
-      const isBlue = gameState.blue.players.some((p) => p.id === playerId);
-      let newScoreRed = gameState.scoreRed;
-      let newScoreBlue = gameState.scoreBlue;
-      if (isRed) newScoreRed = Math.max(0, newScoreRed - 1);
-      if (isBlue) newScoreBlue = Math.max(0, newScoreBlue - 1);
-      setGameState((prev) =>
-        prev
-          ? { ...prev, scoreRed: newScoreRed, scoreBlue: newScoreBlue }
-          : null
-      );
-      try {
-        await matchService.updateScore(
-          currentMatchId,
-          newScoreRed,
-          newScoreBlue
-        );
-      } catch (error) {
-        console.error(error);
-      }
-    }
-  };
-
   const handleEndMatch = async (winnerColor: "RED" | "BLUE") => {
     if (!gameState || !currentMatchId) return;
     isEndingRef.current = true;
@@ -335,127 +203,6 @@ export default function Dashboard() {
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleFinishDay = async () => {
-    const confirmEnd = window.confirm(
-      "Deseja realmente encerrar o racha por hoje?\n\nIsso irá:\n1. Finalizar a partida atual.\n2. Limpar a lista de presença (check-in).\n3. Apagar rascunhos salvos."
-    );
-
-    if (!confirmEnd) return;
-
-    try {
-      setLoading(true);
-      isEndingRef.current = true;
-
-      if (currentMatchId && gameState) {
-        let finalWinner: "RED" | "BLUE" | "DRAW" = "DRAW";
-        if (gameState.scoreRed > gameState.scoreBlue) finalWinner = "RED";
-        if (gameState.scoreBlue > gameState.scoreRed) finalWinner = "BLUE";
-
-        await matchService.finishMatch(
-          currentMatchId,
-          finalWinner,
-          gameState.scoreRed,
-          gameState.scoreBlue
-        );
-      }
-
-      sessionStorage.removeItem("draft_backup");
-      await lobbyService.updateLobbyOrder([]);
-
-      setGameState(null);
-      setDraftState(null);
-      updateSelectedIds([]);
-      setCurrentMatchId(null);
-
-      navigate("/");
-    } catch (error) {
-      console.error(error);
-      alert("Erro ao encerrar sessão.");
-      isEndingRef.current = false;
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleQuickMove = async (targetPlayerId: string) => {
-    if (!movingPlayerId || !gameState || !currentMatchId) return;
-
-    const currentQueueList = gameState.queue.flatMap((t) => t.players);
-    const newQueueList = movePlayerInQueue(
-      currentQueueList,
-      movingPlayerId,
-      targetPlayerId
-    );
-
-    const newTeams = buildQueueTeams(newQueueList);
-    setGameState({ ...gameState, queue: newTeams });
-    setMovingPlayerId(null);
-
-    try {
-      await matchService.updateQueue(
-        currentMatchId,
-        newQueueList.map((p) => p.id)
-      );
-    } catch (error) {
-      console.error("Erro ao salvar movimento rápido:", error);
-    }
-  };
-
-  const handleQueueReorderActiveMatch = async (
-    playerId: string,
-    direction: "up" | "down"
-  ) => {
-    if (!gameState || !currentMatchId) return;
-
-    const currentQueueList = gameState.queue.flatMap((t) => t.players);
-    const newQueueList = reorderQueue(currentQueueList, playerId, direction);
-
-    const newTeams = buildQueueTeams(newQueueList);
-    setGameState({
-      ...gameState,
-      queue: newTeams,
-    });
-
-    try {
-      await matchService.updateQueue(
-        currentMatchId,
-        newQueueList.map((p: Player) => p.id)
-      );
-    } catch (error) {
-      console.error("Erro ao atualizar fila:", error);
-    }
-  };
-
-  const handleAddLatePlayers = async (ids: string[]) => {
-    if (!gameState) return;
-
-    const updatedSelection = [...selectedIds, ...ids];
-    updateSelectedIds(updatedSelection);
-    await lobbyService.updateLobbyOrder(updatedSelection);
-
-    const newPlayers = ids
-      .map((id) => allPlayers.find((p) => p.id === id))
-      .filter((p): p is Player => !!p);
-
-    setGameState((prev) => {
-      if (!prev) return null;
-
-      const currentQueueList = prev.queue.flatMap((t) => t.players);
-      const newFullQueue = [...currentQueueList, ...newPlayers];
-
-      if (currentMatchId)
-        matchService
-          .updateQueue(
-            currentMatchId,
-            newFullQueue.map((p) => p.id)
-          )
-          .catch(console.error);
-
-      const newTeams = buildQueueTeams(newFullQueue);
-      return { ...prev, queue: newTeams };
-    });
   };
 
   // Renderização simplificada
