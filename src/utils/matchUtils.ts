@@ -67,8 +67,10 @@ export function movePlayerInQueue(
 
   if (sourceIndex === -1 || targetIndex === -1) return queue;
 
-  const [movedPlayer] = newQueue.splice(sourceIndex, 1);
-  newQueue.splice(targetIndex, 0, movedPlayer);
+  // Swap logic instead of insertion
+  const temp = newQueue[sourceIndex];
+  newQueue[sourceIndex] = newQueue[targetIndex];
+  newQueue[targetIndex] = temp;
 
   return newQueue;
 }

@@ -340,9 +340,14 @@ export function useMatchState({
   const handleAddLatePlayers = async (ids: string[]) => {
     if (!gameState) return;
 
-    const updatedSelection = [...selectedIds, ...ids];
-    updateSelectedIds(updatedSelection);
-    await lobbyService.updateLobbyOrder(updatedSelection);
+    // Apenas adiciona ao checkout se ainda não estiver lá (Evita 'fantasmas' no índice)
+    const newIds = ids.filter(id => !selectedIds.includes(id));
+    const updatedSelection = [...selectedIds, ...newIds];
+    
+    if (newIds.length > 0) {
+        updateSelectedIds(updatedSelection);
+        await lobbyService.updateLobbyOrder(updatedSelection);
+    }
 
     const newPlayers = ids
       .map((id) => allPlayers.find((p) => p.id === id))
@@ -352,7 +357,13 @@ export function useMatchState({
       if (!prev) return null;
 
       const currentQueueList = prev.queue.flatMap((t) => t.players);
-      const newFullQueue = [...currentQueueList, ...newPlayers];
+      
+      // Filtra duplicatas antes de adicionar
+      const uniqueNewPlayers = newPlayers.filter(
+        np => !currentQueueList.some(qp => qp.id === np.id)
+      );
+
+      const newFullQueue = [...currentQueueList, ...uniqueNewPlayers];
 
       if (currentMatchId)
         matchService
