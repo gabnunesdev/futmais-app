@@ -122,7 +122,7 @@ export const matchService = {
   registerEvent: async (
     matchId: string,
     playerId: string,
-    type: "GOAL" | "ASSIST"
+    type: "GOAL" | "ASSIST" | "YELLOW_CARD" | "RED_CARD"
   ) => {
     const { error } = await supabase.from("match_events").insert({
       match_id: matchId,
@@ -172,4 +172,23 @@ export const matchService = {
 
     if (error) throw error;
   },
+
+  substitutePlayer: async (
+    matchId: string, 
+    redIds: string[], 
+    blueIds: string[], 
+    queueIds: string[]
+  ) => {
+    const { error } = await supabase
+      .from("matches")
+      .update({
+        team_red_ids: redIds,
+        team_blue_ids: blueIds,
+        queue_ids: queueIds,
+        last_active_at: new Date().toISOString()
+      })
+      .eq("id", matchId);
+
+    if (error) throw error;
+  }
 };

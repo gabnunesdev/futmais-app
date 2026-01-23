@@ -109,6 +109,12 @@ export interface AuthContextType {
 
 // --- TIPOS LOCAIS ---
 export type ViewState = "LOBBY" | "DRAFT" | "MATCH";
-export type PlayerStats = { goals: number; assists: number };
+export type PlayerStats = { goals: number; assists: number; yellowCards?: number; redCards?: number };
 export type GameOverReason = "GOAL_LIMIT" | "TIME_LIMIT" | "PENALTIES" | null;
 export type Period = "TODAY" | "MONTH" | "YEAR" | "ALL";
+
+export interface DraftState {
+  red: Player[];
+  blue: Player[];
+  queue: Player[];
+}
