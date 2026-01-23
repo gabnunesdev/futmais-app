@@ -132,7 +132,7 @@ export function useMatchState({
     // 3. Montar novos times
     let newRed = [...gameState.red.players];
     let newBlue = [...gameState.blue.players];
-    let newQueue = [...queueList];
+    const newQueue = [...queueList];
 
     // Remover Player In da fila se estiver lá
     if (playerInIndex !== -1) {
@@ -385,7 +385,6 @@ export function useMatchState({
       confirmMatchStart,
       handleFinishDay,
       handleQuickMove,
-      handleQueueReorderActiveMatch,
       handleQueueReorderActiveMatch,
       handleAddLatePlayers,
       handleCard,
